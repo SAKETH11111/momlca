@@ -16,6 +16,9 @@ clean-logs: ## Clean logs
 format: ## Run pre-commit hooks
 	pre-commit run -a
 
+lint: ## Run linting (ruff check + mypy)
+	poetry run ruff check . && poetry run mypy src/
+
 sync: ## Merge changes from main branch to your current branch
 	git pull
 	git pull origin main

@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Tuple
+import inspect
+from typing import Any
 
 import hydra
 import rootutils
@@ -35,8 +36,12 @@ from src.utils import (
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
+def _supports_weights_only(callable_obj: object) -> bool:
+    return "weights_only" in inspect.signature(callable_obj).parameters
+
+
 @task_wrapper
-def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Evaluates given checkpoint on a datamodule testset.
 
     This method is wrapped in optional @task_wrapper decorator, that controls the behavior during
@@ -54,7 +59,7 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     model: LightningModule = hydra.utils.instantiate(cfg.model)
 
     log.info("Instantiating loggers...")
-    logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
+    logger: list[Logger] = instantiate_loggers(cfg.get("logger"))
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
     trainer: Trainer = hydra.utils.instantiate(cfg.trainer, logger=logger)
@@ -72,7 +77,10 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         log_hyperparameters(object_dict)
 
     log.info("Starting testing!")
-    trainer.test(model=model, datamodule=datamodule, ckpt_path=cfg.ckpt_path)
+    test_kwargs = {}
+    if _supports_weights_only(trainer.test):
+        test_kwargs["weights_only"] = False
+    trainer.test(model=model, datamodule=datamodule, ckpt_path=cfg.ckpt_path, **test_kwargs)
 
     # for predictions use trainer.predict(...)
     # predictions = trainer.predict(model=model, dataloaders=dataloaders, ckpt_path=cfg.ckpt_path)
