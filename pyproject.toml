@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "MoML-CA: Molecular Machine Learning with GNNs for PFAS Property Prediction"
 authors = ["Saketh", "Daniel"]
 readme = "README.md"
-packages = []
+packages = [{include = "gnn", from = "src"}]
+include = ["src/gnn/py.typed"]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
