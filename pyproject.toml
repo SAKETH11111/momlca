@@ -1,3 +1,38 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "momlca"
+version = "0.1.0"
+description = "MoML-CA: Molecular Machine Learning with GNNs for PFAS Property Prediction"
+authors = ["Saketh", "Daniel"]
+readme = "README.md"
+packages = []
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+torch = ">=2.0.0"
+torchvision = ">=0.15.0"
+lightning = ">=2.1.0"
+torchmetrics = ">=0.11.4"
+hydra-core = "1.3.2"
+hydra-colorlog = "1.2.0"
+hydra-optuna-sweeper = "1.2.0"
+omegaconf = "*"
+rich = "*"
+rootutils = "*"
+wandb = "*"
+torch-geometric = "*"
+rdkit = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+pytest-cov = "*"
+pre-commit = "*"
+mypy = "*"
+ruff = "*"
+
 [tool.pytest.ini_options]
 addopts = [
   "--color=yes",
