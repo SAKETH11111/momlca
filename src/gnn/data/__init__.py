@@ -1,5 +1,6 @@
 """Data loading and processing utilities."""
 
+from .datasets import PFASBenchDataset
 from .loaders import load_mol, load_sdf, load_smiles
 from .transforms import (
     ATOM_FEATURE_DIM,
@@ -13,6 +14,8 @@ from .transforms import (
 )
 
 __all__ = [
+    # Datasets
+    "PFASBenchDataset",
     # Loaders
     "load_smiles",
     "load_sdf",

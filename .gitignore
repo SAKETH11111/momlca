@@ -150,6 +150,9 @@ configs/local/default.yaml
 /logs/*
 !/data/.gitkeep
 !/logs/.gitkeep
+!/data/pfasbench/
+!/data/pfasbench/raw/
+/data/pfasbench/processed/
 .env
 
 # Aim logging

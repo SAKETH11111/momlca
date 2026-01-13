@@ -26,6 +26,7 @@ rootutils = "*"
 wandb = "*"
 torch-geometric = "*"
 rdkit = "*"
+pandas = "^2.3.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
