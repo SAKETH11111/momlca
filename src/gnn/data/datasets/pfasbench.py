@@ -100,6 +100,15 @@ class PFASBenchDataset(InMemoryDataset):
         """List of property names in the dataset."""
         return ["logS", "logP", "pKa"]
 
+    @property
+    def property_units(self) -> dict[str, str]:
+        """Units metadata for each property."""
+        return {
+            "logS": "log(mol/L)",
+            "logP": "unitless",
+            "pKa": "pH",
+        }
+
     def download(self) -> None:
         """Download raw data files.
 
