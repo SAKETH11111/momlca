@@ -11,3 +11,7 @@ class FeaturizationError(GNNError):
 
 class InvalidSMILESError(FeaturizationError):
     """Raised when SMILES string cannot be parsed."""
+
+
+class InvalidFileError(FeaturizationError):
+    """Raised when molecular structure file cannot be loaded or parsed."""
