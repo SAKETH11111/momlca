@@ -20,3 +20,4 @@ repos:
       - id: mypy
         additional_dependencies: []
         args: [--ignore-missing-imports]
+        pass_filenames: false

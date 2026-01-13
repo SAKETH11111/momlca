@@ -83,6 +83,9 @@ warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = false
 disallow_untyped_defs = false
+mypy_path = "src"
+explicit_package_bases = true
+files = ["src/gnn"]
 
 [[tool.mypy.overrides]]
 module = [

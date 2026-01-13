@@ -11,6 +11,7 @@ from .constants import (
     HYBRIDIZATION_TYPES,
 )
 from .featurizer import MoleculeFeaturizer
+from .to_pyg import mol_to_pyg_data, mols_to_pyg_batch
 
 __all__ = [
     # Main featurizer
@@ -19,6 +20,9 @@ __all__ = [
     "get_atom_features",
     "get_bond_features",
     "get_edge_index",
+    # PyG conversion
+    "mol_to_pyg_data",
+    "mols_to_pyg_batch",
     # Constants
     "ATOM_FEATURE_DIM",
     "BOND_FEATURE_DIM",
