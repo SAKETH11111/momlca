@@ -2,6 +2,7 @@
 
 from .datasets import PFASBenchDataset
 from .loaders import load_mol, load_sdf, load_smiles
+from .splits import get_scaffold, group_by_scaffold, scaffold_split
 from .transforms import (
     ATOM_FEATURE_DIM,
     BOND_FEATURE_DIM,
@@ -20,6 +21,10 @@ __all__ = [
     "load_smiles",
     "load_sdf",
     "load_mol",
+    # Splits
+    "scaffold_split",
+    "get_scaffold",
+    "group_by_scaffold",
     # Featurizers
     "MoleculeFeaturizer",
     "get_atom_features",
