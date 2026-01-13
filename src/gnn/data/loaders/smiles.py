@@ -3,7 +3,7 @@
 from rdkit import Chem
 from rdkit.Chem.SaltRemover import SaltRemover
 
-from gnn.exceptions import InvalidSMILESError
+from ...exceptions import InvalidSMILESError
 
 
 def load_smiles(smiles: str) -> Chem.Mol:
@@ -29,8 +29,14 @@ def load_smiles(smiles: str) -> Chem.Mol:
     remover = SaltRemover()
     mol = remover.StripMol(mol, dontRemoveEverything=True)
 
+    fragments = Chem.GetMolFrags(mol, asMols=True)
+    if fragments:
+        mol = max(fragments, key=lambda fragment: fragment.GetNumAtoms())
+
     # Canonicalize by converting to canonical SMILES and back
     canonical_smiles = Chem.MolToSmiles(mol, canonical=True)
     mol = Chem.MolFromSmiles(canonical_smiles)
+    if mol is None:
+        raise InvalidSMILESError(f"Failed to canonicalize SMILES: {canonical_smiles!r}")
 
     return mol

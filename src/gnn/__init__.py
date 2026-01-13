@@ -2,7 +2,7 @@
 
 __version__ = "0.1.0"
 
-from gnn.exceptions import (
+from .exceptions import (
     FeaturizationError,
     GNNError,
     InvalidSMILESError,

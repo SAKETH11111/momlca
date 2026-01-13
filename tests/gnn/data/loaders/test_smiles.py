@@ -73,6 +73,13 @@ class TestLoadSmiles:
         assert "Na" not in canonical
         assert mol.GetNumAtoms() == 4  # C, C, O, O
 
+    def test_multi_fragment_keeps_largest(self) -> None:
+        """Test that multi-fragment SMILES keeps the largest fragment."""
+        mol = load_smiles("C.CCC")  # methane + propane -> keep propane
+        canonical = Chem.MolToSmiles(mol, canonical=True)
+        assert "." not in canonical
+        assert canonical == "CCC"
+
     def test_invalid_smiles_raises_error(self) -> None:
         """Test that invalid SMILES raises InvalidSMILESError."""
         with pytest.raises(InvalidSMILESError) as exc_info:
