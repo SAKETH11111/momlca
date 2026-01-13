@@ -2,7 +2,14 @@
 
 from .datasets import PFASBenchDataset
 from .loaders import load_mol, load_sdf, load_smiles
-from .splits import get_scaffold, group_by_scaffold, scaffold_split
+from .splits import (
+    get_chain_length,
+    get_headgroup,
+    get_scaffold,
+    group_by_scaffold,
+    pfas_ood_split,
+    scaffold_split,
+)
 from .transforms import (
     ATOM_FEATURE_DIM,
     BOND_FEATURE_DIM,
@@ -21,10 +28,14 @@ __all__ = [
     "load_smiles",
     "load_sdf",
     "load_mol",
-    # Splits
+    # Scaffold splits
     "scaffold_split",
     "get_scaffold",
     "group_by_scaffold",
+    # PFAS OOD splits
+    "pfas_ood_split",
+    "get_chain_length",
+    "get_headgroup",
     # Featurizers
     "MoleculeFeaturizer",
     "get_atom_features",
