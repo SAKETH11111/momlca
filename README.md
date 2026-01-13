@@ -1,5 +1,7 @@
 # momlca
 
+[![CI](https://github.com/SAKETH11111/momlca/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SAKETH11111/momlca/actions/workflows/ci.yml)
+
 MoML-CA research project scaffold based on lightning-hydra-template.
 
 ## Requirements
