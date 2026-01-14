@@ -16,8 +16,19 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
+
+
+def _get_label_scalar(label_tensor: torch.Tensor, prop_idx: int) -> float:
+    if label_tensor.ndim == 1:
+        return float(label_tensor[prop_idx].item())
+    if label_tensor.ndim == 2 and label_tensor.shape[0] == 1:
+        return float(label_tensor[0, prop_idx].item())
+    raise ValueError(
+        f"Expected labels with shape (num_properties,) or (1, num_properties), got {tuple(label_tensor.shape)}"
+    )
 
 
 @dataclass
@@ -227,9 +238,9 @@ class DataValidator:
             indices: list[int] = []
 
             for i in range(len(dataset)):
-                val = dataset[i].y[prop_idx].item()
+                val = _get_label_scalar(dataset[i].y, prop_idx)
                 if not np.isnan(val):
-                    values.append(val)
+                    values.append(float(val))
                     indices.append(i)
 
             if len(values) < 2:
@@ -270,15 +281,8 @@ class DataValidator:
         missing: dict[str, int] = dict.fromkeys(property_names, 0)
 
         for i in range(len(dataset)):
-            y = dataset[i].y
             for prop_idx, prop_name in enumerate(property_names):
-                value = y[prop_idx]
-                try:
-                    scalar = float(value)
-                except TypeError:
-                    raise ValueError(
-                        f"Expected scalar label value at dataset[{i}].y[{prop_idx}] for {prop_name}, got {type(value)}"
-                    ) from None
+                scalar = _get_label_scalar(dataset[i].y, prop_idx)
                 if np.isnan(scalar):
                     missing[prop_name] += 1
 
@@ -305,9 +309,8 @@ class DataValidator:
         property_names = getattr(dataset, "property_names", ["logS", "logP", "pKa"])
 
         for i in range(len(dataset)):
-            y = dataset[i].y
             for prop_idx, prop_name in enumerate(property_names):
-                val = y[prop_idx].item()
+                val = _get_label_scalar(dataset[i].y, prop_idx)
                 if np.isnan(val):
                     continue
 
@@ -469,9 +472,9 @@ def generate_report(
     for prop_idx, prop_name in enumerate(property_names):
         values = []
         for i in range(len(dataset)):
-            val = dataset[i].y[prop_idx].item()
+            val = _get_label_scalar(dataset[i].y, prop_idx)
             if not np.isnan(val):
-                values.append(val)
+                values.append(float(val))
 
         if values:
             lines.append(f"### {prop_name}")
