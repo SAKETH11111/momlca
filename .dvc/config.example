@@ -1,0 +1,47 @@
+# DVC Configuration Examples
+# ===========================
+# Copy this to config.local for your own remote settings
+# (config.local is gitignored and overrides config)
+
+# Local Storage (default for development)
+# ----------------------------------------
+# [core]
+#     remote = localremote
+# ['remote "localremote"']
+#     url = /path/to/local/storage
+
+# AWS S3 (recommended for production)
+# ------------------------------------
+# [core]
+#     remote = s3remote
+# ['remote "s3remote"']
+#     url = s3://your-bucket-name/dvc-storage
+#     # Optional: specify profile for credentials
+#     # profile = your-aws-profile
+
+# Google Cloud Storage
+# ----------------------
+# [core]
+#     remote = gcsremote
+# ['remote "gcsremote"']
+#     url = gs://your-bucket-name/dvc-storage
+#     # GCS uses application default credentials
+
+# Azure Blob Storage
+# --------------------
+# [core]
+#     remote = azureremote
+# ['remote "azureremote"']
+#     url = azure://your-container-name/dvc-storage
+#     # Requires AZURE_STORAGE_CONNECTION_STRING env var
+
+# SSH/SFTP Remote
+# ----------------
+# [core]
+#     remote = sshremote
+# ['remote "sshremote"']
+#     url = ssh://user@host/path/to/storage
+
+# Notes:
+# - Use `dvc remote modify <remote> --local credentialpath <path>` for sensitive settings
+# - Cloud remotes require additional DVC packages: pip install dvc-s3, dvc-gs, dvc-azure
