@@ -1,0 +1,18 @@
+_target_: gnn.data.datamodules.PFASBenchDataModule
+# Root directory for dataset storage (expects pfasbench/raw, pfasbench/processed)
+root: ${paths.data_dir}
+# Batch size for PyG DataLoader
+batch_size: 32
+# Split strategy: scaffold | pfas_ood | random
+split: scaffold
+# Random seed for splits
+seed: 42
+# Number of DataLoader worker processes
+num_workers: 0
+# Train/val/test fractions (must sum to 1.0 for scaffold/random)
+train_frac: 0.8
+val_frac: 0.1
+test_frac: 0.1
+# OOD split settings (only used when split=pfas_ood)
+holdout: null
+holdout_values: null

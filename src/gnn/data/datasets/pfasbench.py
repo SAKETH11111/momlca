@@ -69,6 +69,44 @@ class PFASBenchDataset(InMemoryDataset):
         resolved_root = self._resolve_dataset_root(root)
         super().__init__(resolved_root, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
+        self._upgrade_labels_if_needed()
+
+    def _upgrade_labels_if_needed(self) -> None:
+        """Upgrade cached labels to row-vector format if needed.
+
+        Older cached datasets stored per-graph ``y`` as shape ``(num_properties,)``,
+        which batches into a flattened 1D tensor. The current format stores
+        per-graph labels as ``(1, num_properties)`` so batches yield
+        ``(batch_size, num_properties)``.
+        """
+        data = getattr(self, "data", None)
+        slices = getattr(self, "slices", None)
+        if data is None or slices is None:
+            return
+
+        y = getattr(data, "y", None)
+        y_slices = slices.get("y") if isinstance(slices, dict) else None
+        if y is None or y_slices is None:
+            return
+        if not isinstance(y, torch.Tensor) or not isinstance(y_slices, torch.Tensor):
+            return
+
+        if y.ndim != 1:
+            return
+
+        num_graphs = int(y_slices.numel()) - 1
+        num_props = len(self.property_names)
+        if num_graphs <= 0 or num_props <= 0:
+            return
+        if int(y_slices[-1].item()) != int(y.numel()):
+            return
+
+        segment_sizes = (y_slices[1:] - y_slices[:-1]).tolist()
+        if not all(int(size) == num_props for size in segment_sizes):
+            return
+
+        data.y = y.view(num_graphs, num_props)
+        slices["y"] = torch.arange(num_graphs + 1, dtype=torch.long)
 
     @staticmethod
     def _resolve_dataset_root(root: str) -> str:
@@ -207,7 +245,8 @@ class PFASBenchDataset(InMemoryDataset):
                             val,
                         )
                         y_values.append(float("nan"))
-            data.y = torch.tensor(y_values, dtype=torch.float32)
+            # Store as row-vector so batched graph labels become (batch_size, num_properties)
+            data.y = torch.tensor([y_values], dtype=torch.float32)
 
             # Add metadata
             data.smiles = Chem.MolToSmiles(mol, canonical=True)
@@ -267,5 +306,5 @@ class PFASBenchDataset(InMemoryDataset):
             Dictionary mapping property names to values.
             Values may be NaN for missing properties.
         """
-        y = self[idx].y
+        y = self[idx].y.squeeze(0)
         return {name: y[i].item() for i, name in enumerate(self.property_names)}

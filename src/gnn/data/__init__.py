@@ -1,5 +1,6 @@
 """Data loading and processing utilities."""
 
+from .datamodules import PFASBenchDataModule
 from .datasets import PFASBenchDataset
 from .loaders import load_mol, load_sdf, load_smiles
 from .splits import (
@@ -23,6 +24,8 @@ from .transforms import (
 from .validation import DataValidator, ValidationResult, generate_report
 
 __all__ = [
+    # DataModules
+    "PFASBenchDataModule",
     # Datasets
     "PFASBenchDataset",
     # Loaders

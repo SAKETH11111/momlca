@@ -90,7 +90,7 @@ class TestPFASBenchDataset:
 
         # Labels
         assert hasattr(data, "y")
-        assert data.y.shape == (3,)  # 3 properties
+        assert data.y.shape == (1, 3)  # 3 properties as row-vector
 
         # Metadata
         assert hasattr(data, "smiles")
@@ -115,9 +115,9 @@ class TestPFASBenchDataset:
         """Test that y tensor contains correct property values."""
         dataset = PFASBenchDataset(root=str(temp_dataset_dir))
         data = dataset[0]  # TFA: logS=-0.5, logP=0.5, pKa=0.5
-        assert abs(data.y[0].item() - (-0.5)) < 1e-6  # logS
-        assert abs(data.y[1].item() - 0.5) < 1e-6  # logP
-        assert abs(data.y[2].item() - 0.5) < 1e-6  # pKa
+        assert abs(data.y[0, 0].item() - (-0.5)) < 1e-6  # logS
+        assert abs(data.y[0, 1].item() - 0.5) < 1e-6  # logP
+        assert abs(data.y[0, 2].item() - 0.5) < 1e-6  # pKa
 
     def test_smiles_is_string(self, temp_dataset_dir: Path) -> None:
         """Test that smiles attribute is string."""
@@ -200,14 +200,14 @@ C(=O)(C(C(C(C(C(C(F)(F)F)(F)F)(F)F)(F)F)(F)F)(F)F)O,PFHpA,-3.0,3.0,
         """Test that missing labels are stored as NaN."""
         dataset = PFASBenchDataset(root=str(temp_dataset_missing))
         data = dataset[0]  # PFHxA has missing pKa
-        assert math.isnan(data.y[2].item())  # pKa should be NaN
+        assert math.isnan(data.y[0, 2].item())  # pKa should be NaN
 
     def test_present_labels_preserved(self, temp_dataset_missing: Path) -> None:
         """Test that present labels are preserved correctly."""
         dataset = PFASBenchDataset(root=str(temp_dataset_missing))
         data = dataset[0]  # PFHxA: logS=-2.5, logP=2.5
-        assert abs(data.y[0].item() - (-2.5)) < 1e-6
-        assert abs(data.y[1].item() - 2.5) < 1e-6
+        assert abs(data.y[0, 0].item() - (-2.5)) < 1e-6
+        assert abs(data.y[0, 1].item() - 2.5) < 1e-6
 
 
 class TestPFASBenchAccessorMethods:
