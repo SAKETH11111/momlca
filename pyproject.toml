@@ -27,6 +27,10 @@ wandb = "*"
 torch-geometric = "*"
 rdkit = "*"
 pandas = "^2.3.3"
+pkapredict = "^0.2.0"
+pka-predictor-moitessier = "^0.1.12"
+requests = "^2.32.3"
+tqdm = "^4.67.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
