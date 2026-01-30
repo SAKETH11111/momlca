@@ -65,24 +65,6 @@ Notes:
 - This script fills missing `pKa` values by default and does not overwrite existing values unless `--overwrite-existing` is passed.
 - pKa predictions are tracked in the `source` column as `pKa:pka-predictor-moitessier`.
 
-### OPERA Predictions (Optional)
-
-If you have OPERA predictions exported to CSV/TSV, you can merge them into the curated dataset:
-
-```bash
-poetry run python scripts/merge_opera_predictions.py \
-  --pfasbench data/pfasbench/raw/pfasbench.csv \
-  --opera data/pfasbench/raw/opera_predictions.csv \
-  --output data/pfasbench/raw/pfasbench_with_opera.csv
-```
-
-To prepare OPERA `.smi` input from `pfasbench.csv`:
-```bash
-poetry run python scripts/prepare_opera_input.py \
-  --input data/pfasbench/raw/pfasbench.csv \
-  --output data/pfasbench/raw/opera_input.smi
-```
-
 ## Properties
 
 | Property | Description | Unit | Range (typical) |
