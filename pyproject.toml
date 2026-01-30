@@ -27,6 +27,9 @@ wandb = "*"
 torch-geometric = "*"
 rdkit = "*"
 pandas = "^2.3.3"
+scikit-learn = "^1.4.0"
+xgboost = "^2.0.0"
+scipy = "^1.12.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
