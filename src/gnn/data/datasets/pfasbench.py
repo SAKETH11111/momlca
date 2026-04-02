@@ -79,8 +79,9 @@ class PFASBenchDataset(InMemoryDataset):
         per-graph labels as ``(1, num_properties)`` so batches yield
         ``(batch_size, num_properties)``.
         """
-        data = getattr(self, "data", None)
-        slices = getattr(self, "slices", None)
+        # Use _data to avoid deprecation warning from PyG InMemoryDataset
+        data = getattr(self, "_data", None)
+        slices = getattr(self, "_slices", None)
         if data is None or slices is None:
             return
 

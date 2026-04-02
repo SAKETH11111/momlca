@@ -30,6 +30,10 @@ pandas = "^2.3.3"
 scikit-learn = "^1.4.0"
 xgboost = "^2.0.0"
 scipy = "^1.12.0"
+pkapredict = "^0.2.0"
+pka-predictor-moitessier = "^0.1.12"
+requests = "^2.32.3"
+tqdm = "^4.67.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
