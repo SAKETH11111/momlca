@@ -1,53 +1,49 @@
-"""Traditional ML baseline models for molecular property prediction.
+"""Traditional descriptor-based baselines for PFAS property prediction."""
 
-This module provides baseline models (Random Forest, XGBoost) that use
-RDKit molecular descriptors for PFAS property prediction.
-
-Example:
-    >>> from gnn.data import PFASBenchDataModule
-    >>> from gnn.baselines import (
-    ...     MolecularDescriptorExtractor,
-    ...     RandomForestBaseline,
-    ...     extract_baseline_data,
-    ... )
-    >>> from gnn.evaluation import ModelComparison
-    >>>
-    >>> # Setup data (same splits as GNN)
-    >>> dm = PFASBenchDataModule(root="data/", split="scaffold", seed=42)
-    >>> dm.setup()
-    >>>
-    >>> # Extract features
-    >>> data = extract_baseline_data(dm)
-    >>>
-    >>> # Train model
-    >>> model = RandomForestBaseline(n_estimators=100)
-    >>> model.fit(data.X_train, data.y_train)
-    >>>
-    >>> # Evaluate
-    >>> predictions = model.predict(data.X_test)
-    >>> comparison = ModelComparison(property_names=["logS", "logP", "pKa"])
-    >>> comparison.add_result("RandomForest", predictions, data.y_test)
-    >>> print(comparison.to_table())
-"""
-
+from gnn.baselines.comparison import ModelComparison, ModelResult
 from gnn.baselines.data_utils import BaselineDataset, extract_baseline_data
-from gnn.baselines.descriptors import MolecularDescriptorExtractor
-from gnn.baselines.models import (
-    BaselineModel,
-    MultiOutputBaselineModel,
+from gnn.baselines.descriptors import DescriptorExtractor, MolecularDescriptorExtractor
+from gnn.baselines.models import BaselineModel, MultiOutputBaselineModel
+from gnn.baselines.random_forest import (
     RandomForestBaseline,
+    get_rf_feature_importances,
+    load_rf_model,
+    predict_rf,
+    save_rf_model,
+    train_rf_baseline,
+)
+from gnn.baselines.xgboost_baseline import (
     XGBoostBaseline,
+    get_xgboost_feature_importances,
+    load_xgboost_model,
+    predict_xgboost,
+    save_xgboost_model,
+    train_xgboost_baseline,
 )
 
 __all__ = [
     # Descriptors
+    "DescriptorExtractor",
     "MolecularDescriptorExtractor",
     # Models
     "BaselineModel",
     "MultiOutputBaselineModel",
     "RandomForestBaseline",
     "XGBoostBaseline",
+    "train_rf_baseline",
+    "predict_rf",
+    "save_rf_model",
+    "load_rf_model",
+    "get_rf_feature_importances",
+    "train_xgboost_baseline",
+    "predict_xgboost",
+    "save_xgboost_model",
+    "load_xgboost_model",
+    "get_xgboost_feature_importances",
     # Data utilities
     "BaselineDataset",
     "extract_baseline_data",
+    # Comparison
+    "ModelComparison",
+    "ModelResult",
 ]
