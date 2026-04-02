@@ -6,11 +6,15 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("sklearn")
+pytest.importorskip("xgboost")
+
+from gnn.baselines.comparison import ModelComparison
 from gnn.baselines.data_utils import extract_baseline_data
-from gnn.baselines.descriptors import MolecularDescriptorExtractor
-from gnn.baselines.models import RandomForestBaseline, XGBoostBaseline
+from gnn.baselines.descriptors import DescriptorExtractor
+from gnn.baselines.random_forest import train_rf_baseline
+from gnn.baselines.xgboost_baseline import train_xgboost_baseline
 from gnn.data.datamodules import PFASBenchDataModule
-from gnn.evaluation.comparison import ModelComparison
 
 
 @pytest.fixture
@@ -79,8 +83,15 @@ class TestBaselineIntegration:
         data = extract_baseline_data(dm)
 
         # Train model
-        model = RandomForestBaseline(n_estimators=10)
-        model.fit(data.X_train, data.y_train)
+        model = train_rf_baseline(
+            data.X_train,
+            data.y_train,
+            X_val=data.X_val,
+            y_val=data.y_val,
+            property_names=data.property_names,
+            feature_names=data.feature_names,
+            n_estimators=10,
+        )
 
         # Predict
         predictions = model.predict(data.X_test)
@@ -104,8 +115,16 @@ class TestBaselineIntegration:
         data = extract_baseline_data(dm)
 
         # Train model
-        model = XGBoostBaseline(n_estimators=10)
-        model.fit(data.X_train, data.y_train)
+        model = train_xgboost_baseline(
+            data.X_train,
+            data.y_train,
+            X_val=data.X_val,
+            y_val=data.y_val,
+            property_names=data.property_names,
+            feature_names=data.feature_names,
+            n_estimators=10,
+            early_stopping_rounds=5,
+        )
 
         # Predict
         predictions = model.predict(data.X_test)
@@ -129,23 +148,38 @@ class TestBaselineIntegration:
         data = extract_baseline_data(dm)
 
         # Train models
-        rf_model = RandomForestBaseline(n_estimators=10)
-        rf_model.fit(data.X_train, data.y_train)
+        rf_model = train_rf_baseline(
+            data.X_train,
+            data.y_train,
+            X_val=data.X_val,
+            y_val=data.y_val,
+            property_names=data.property_names,
+            feature_names=data.feature_names,
+            n_estimators=10,
+        )
+        xgb_model = train_xgboost_baseline(
+            data.X_train,
+            data.y_train,
+            X_val=data.X_val,
+            y_val=data.y_val,
+            property_names=data.property_names,
+            feature_names=data.feature_names,
+            n_estimators=10,
+            early_stopping_rounds=5,
+        )
 
-        xgb_model = XGBoostBaseline(n_estimators=10)
-        xgb_model.fit(data.X_train, data.y_train)
-
-        # Predict
-        rf_preds = rf_model.predict(data.X_test)
-        xgb_preds = xgb_model.predict(data.X_test)
-
-        # Compare
         comparison = ModelComparison(property_names=data.property_names)
-        comparison.add_result("RandomForest", rf_preds, data.y_test)
-        comparison.add_result("XGBoost", xgb_preds, data.y_test)
+        comparison.add_model("RandomForest", rf_model)
+        comparison.add_model("XGBoost", xgb_model)
+        comparison.evaluate_splits(
+            {
+                "validation": (data.X_val, data.y_val),
+                "test": (data.X_test, data.y_test),
+            }
+        )
 
         # Check results
-        df = comparison.to_dataframe()
+        df = comparison.to_dataframe(split_name="test")
         assert len(df) == 2
         assert "RandomForest" in df.index
         assert "XGBoost" in df.index
@@ -154,7 +188,7 @@ class TestBaselineIntegration:
         assert "mae_mean" in df.columns
         assert "rmse_mean" in df.columns
         assert "r2_mean" in df.columns
-        # Note: spearman_mean requires >2 samples per property, may not be present with small test sets
+        assert "pearson_mean" in df.columns
 
         # Generate table output
         table = comparison.to_table()
@@ -187,7 +221,7 @@ class TestBaselineIntegration:
         dm.setup()
 
         # Use custom descriptors
-        extractor = MolecularDescriptorExtractor(
+        extractor = DescriptorExtractor(
             descriptor_names=["MolWt", "MolLogP", "TPSA", "NumHDonors", "NumHAcceptors"]
         )
 

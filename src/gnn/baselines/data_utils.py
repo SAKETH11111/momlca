@@ -1,8 +1,4 @@
-"""Data utilities for ML baselines.
-
-Provides functions to extract features and labels from PFASBenchDataModule
-for use with scikit-learn style models.
-"""
+"""Data utilities for descriptor-based baseline models."""
 
 from __future__ import annotations
 
@@ -12,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from gnn.baselines.descriptors import MolecularDescriptorExtractor
+from gnn.baselines.descriptors import DescriptorExtractor, MolecularDescriptorExtractor
 
 if TYPE_CHECKING:
     from gnn.data.datamodules import PFASBenchDataModule
@@ -53,7 +49,7 @@ class BaselineDataset:
 
 def extract_baseline_data(
     datamodule: PFASBenchDataModule,
-    extractor: MolecularDescriptorExtractor | None = None,
+    extractor: DescriptorExtractor | None = None,
     normalize_features: bool = True,
 ) -> BaselineDataset:
     """Extract features and labels from PFASBenchDataModule.
@@ -140,7 +136,7 @@ def extract_baseline_data(
         y_val=y_val,
         X_test=X_test,
         y_test=y_test,
-        feature_names=extractor.descriptor_names,
+        feature_names=extractor.feature_names,
         property_names=property_names,
         smiles_train=smiles_train,
         smiles_val=smiles_val,

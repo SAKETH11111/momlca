@@ -6,11 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from gnn.evaluation.comparison import (
-    ModelComparison,
-    ModelResult,
-    compute_regression_metrics,
-)
+from gnn.evaluation.comparison import ModelComparison, ModelResult, compute_regression_metrics
 
 
 class TestComputeRegressionMetrics:
@@ -72,6 +68,14 @@ class TestComputeRegressionMetrics:
 
         assert np.isclose(metrics["spearman_prop1"], 1.0)
 
+    def test_pearson_correlation(self) -> None:
+        y_true = np.array([[1.0], [2.0], [3.0], [4.0]])
+        y_pred = np.array([[2.0], [4.0], [6.0], [8.0]])
+
+        metrics = compute_regression_metrics(y_true, y_pred, ["prop1"])
+
+        assert np.isclose(metrics["pearson_prop1"], 1.0)
+
 
 class TestModelComparison:
     """Test suite for ModelComparison class."""
@@ -95,6 +99,19 @@ class TestModelComparison:
         assert result.model_name == "Model1"
         assert "mae_prop1" in result.metrics
         assert len(comparison.results) == 1
+
+    def test_add_model_then_evaluate(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+
+        class ConstantPredictor:
+            def predict(self, X: np.ndarray) -> np.ndarray:
+                return np.ones((len(X), 1))
+
+        comparison.add_model("Constant", ConstantPredictor())
+        results = comparison.evaluate(np.zeros((3, 2)), np.ones((3, 1)))
+
+        assert len(results) == 1
+        assert results[0].model_name == "Constant"
 
     def test_multiple_models(self) -> None:
         """Test comparing multiple models."""
@@ -144,6 +161,16 @@ class TestModelComparison:
         assert "mae" in table.lower()
         assert "r2" in table.lower()
 
+    def test_multi_split_dataframe_uses_multiindex(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+
+        comparison.add_result("Model1", np.array([[1.0], [2.0]]), np.array([[1.0], [2.0]]), split_name="validation")
+        comparison.add_result("Model1", np.array([[1.0], [2.0]]), np.array([[1.0], [2.0]]), split_name="test")
+
+        df = comparison.to_dataframe()
+        assert ("validation", "Model1") in df.index
+        assert ("test", "Model1") in df.index
+
     def test_save(self) -> None:
         """Test saving comparison to CSV."""
         comparison = ModelComparison(property_names=["prop1"])
@@ -160,6 +187,17 @@ class TestModelComparison:
             assert path.exists()
             content = path.read_text()
             assert "Model1" in content
+
+    def test_save_report(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+        comparison.add_result("Model1", np.array([[1.0], [2.0]]), np.array([[1.0], [2.0]]))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "comparison.md"
+            comparison.save_report(path)
+
+            assert path.exists()
+            assert "Baseline Model Comparison" in path.read_text()
 
     def test_get_best_model(self) -> None:
         """Test getting best model."""

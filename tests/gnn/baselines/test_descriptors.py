@@ -1,131 +1,114 @@
-"""Tests for molecular descriptor extraction."""
+"""Tests for descriptor and fingerprint extraction."""
+
+from __future__ import annotations
 
 import numpy as np
 import pytest
+from rdkit import Chem
 
-from gnn.baselines.descriptors import MolecularDescriptorExtractor
+from gnn.baselines.descriptors import DescriptorExtractor, MolecularDescriptorExtractor
+from gnn.exceptions import InvalidSMILESError
 
 
-class TestMolecularDescriptorExtractor:
-    """Test suite for MolecularDescriptorExtractor."""
+class TestDescriptorExtractor:
+    """Test suite for descriptor extraction."""
 
     def test_initialization_default(self) -> None:
-        """Test extractor initializes with all descriptors."""
-        extractor = MolecularDescriptorExtractor()
-        # RDKit has 200+ descriptors
+        extractor = DescriptorExtractor()
         assert extractor.num_descriptors > 200
+        assert extractor.num_features == extractor.num_descriptors
 
-    def test_initialization_custom_descriptors(self) -> None:
-        """Test extractor with custom descriptor list."""
-        desc_names = ["MolWt", "MolLogP", "TPSA"]
-        extractor = MolecularDescriptorExtractor(descriptor_names=desc_names)
-        assert extractor.num_descriptors == 3
-        assert extractor.descriptor_names == desc_names
+    def test_alias_preserved(self) -> None:
+        extractor = MolecularDescriptorExtractor(descriptor_names=["MolWt", "MolLogP"])
+        assert isinstance(extractor, DescriptorExtractor)
+        assert extractor.descriptor_names == ["MolWt", "MolLogP"]
 
-    def test_initialization_invalid_handle_errors(self) -> None:
-        """Test that invalid handle_errors raises ValueError."""
-        with pytest.raises(ValueError, match="handle_errors must be"):
-            MolecularDescriptorExtractor(handle_errors="invalid")
+    def test_subset_selection(self) -> None:
+        extractor = DescriptorExtractor(descriptor_set="physicochemical")
+        assert "MolWt" in extractor.descriptor_names
+        assert len(extractor.descriptor_names) < len(DescriptorExtractor.available_descriptor_names())
 
-    def test_transform_simple_molecules(self) -> None:
-        """Test descriptor extraction for simple molecules."""
+    def test_molecule_first_extract(self) -> None:
+        mol = Chem.MolFromSmiles("CCO")
+        extractor = DescriptorExtractor(descriptor_names=["MolWt", "MolLogP", "TPSA"])
+        features = extractor.extract(mol)
+
+        assert features.shape == (3,)
+        assert np.isfinite(features).all()
+
+    def test_extract_batch_from_smiles(self) -> None:
         smiles = ["CCO", "c1ccccc1", "CC(=O)O"]
-        extractor = MolecularDescriptorExtractor()
-        X = extractor.transform(smiles)
+        extractor = DescriptorExtractor(descriptor_names=["MolWt", "MolLogP", "TPSA"])
+        matrix = extractor.extract_from_smiles(smiles)
 
-        assert X.shape[0] == 3
-        assert X.shape[1] == extractor.num_descriptors
-        assert not np.all(np.isnan(X))
+        assert matrix.shape == (3, 3)
+        assert np.isfinite(matrix).all()
 
-    def test_transform_pfas_molecules(self) -> None:
-        """Test descriptor extraction for PFAS molecules."""
-        pfas_smiles = [
-            "C(=O)(C(F)(F)F)O",  # TFA
-            "C(=O)(C(C(F)(F)F)(F)F)O",  # PFPA
-        ]
-        extractor = MolecularDescriptorExtractor()
-        X = extractor.transform(pfas_smiles)
+    def test_invalid_smiles_nan_strategy(self) -> None:
+        extractor = DescriptorExtractor(
+            descriptor_names=["MolWt", "MolLogP"],
+            handle_errors="nan",
+            missing_value_strategy="nan",
+        )
+        matrix = extractor.extract_from_smiles(["CCO", "NOT_A_SMILES", "CCN"])
 
-        assert X.shape[0] == 2
-        # Check that we got valid features
-        assert not np.all(np.isnan(X))
+        assert matrix.shape == (3, 2)
+        assert np.isnan(matrix[1]).all()
+        assert np.isfinite(matrix[0]).all()
+        assert np.isfinite(matrix[2]).all()
 
-    def test_transform_invalid_smiles_nan(self) -> None:
-        """Test handling of invalid SMILES with nan strategy."""
-        smiles = ["CCO", "INVALID_SMILES_XYZ", "c1ccccc1"]
-        extractor = MolecularDescriptorExtractor(handle_errors="nan")
-        X = extractor.transform(smiles)
+    def test_invalid_smiles_raise_strategy(self) -> None:
+        extractor = DescriptorExtractor(handle_errors="raise")
+        with pytest.raises(InvalidSMILESError):
+            extractor.extract_from_smiles(["CCO", "NOT_A_SMILES"])
 
-        assert X.shape[0] == 3
-        # Second row should be all NaN
-        assert np.all(np.isnan(X[1]))
-        # First and third rows should have valid values
-        assert not np.all(np.isnan(X[0]))
-        assert not np.all(np.isnan(X[2]))
+    def test_fingerprint_only_support(self) -> None:
+        extractor = DescriptorExtractor(
+            include_descriptors=False,
+            fingerprint_type="maccs",
+        )
+        features = extractor.extract_from_smiles(["CCO"])
 
-    def test_transform_invalid_smiles_raise(self) -> None:
-        """Test handling of invalid SMILES with raise strategy."""
-        smiles = ["CCO", "INVALID_SMILES_XYZ"]
-        extractor = MolecularDescriptorExtractor(handle_errors="raise")
+        assert features.shape == (1, 167)
+        assert extractor.feature_names[0] == "maccs_bit_0"
 
-        with pytest.raises(Exception):
-            extractor.transform(smiles)
+    def test_combined_descriptor_and_fingerprint_features(self) -> None:
+        extractor = DescriptorExtractor(
+            descriptor_names=["MolWt", "MolLogP"],
+            fingerprint_type="morgan",
+            fingerprint_size=32,
+        )
+        features = extractor.extract_from_smiles(["CCO"])
 
-    def test_fit_transform_normalization(self) -> None:
-        """Test that fit_transform normalizes features."""
-        smiles = ["CCO", "c1ccccc1", "CC(=O)O", "CCCC", "c1ccc(O)cc1"]
-        extractor = MolecularDescriptorExtractor()
+        assert features.shape == (1, 34)
+        assert extractor.feature_names[:2] == ["MolWt", "MolLogP"]
+        assert extractor.feature_names[-1] == "morgan_bit_31"
 
-        X = extractor.fit_transform(smiles, normalize=True)
+    def test_fit_transform_normalizes_and_imputes(self) -> None:
+        extractor = DescriptorExtractor(
+            descriptor_names=["MolWt", "MolLogP", "TPSA"],
+            missing_value_strategy="mean",
+        )
+        train_features = extractor.fit_transform(["CCO", "CCN", "c1ccccc1"], normalize=True)
+        test_features = extractor.transform(["CCCl", "CCBr"], normalize=True)
 
-        # After normalization, we should have stored means/stds
-        assert extractor._means is not None
-        assert extractor._stds is not None
+        assert train_features.shape == (3, 3)
+        assert test_features.shape == (2, 3)
+        assert np.isfinite(train_features).all()
+        assert np.isfinite(test_features).all()
 
-        # Feature matrix should have expected shape
-        assert X.shape == (5, extractor.num_descriptors)
+    def test_transform_without_fit_and_normalize_raises(self) -> None:
+        extractor = DescriptorExtractor(descriptor_names=["MolWt"])
+        with pytest.raises(RuntimeError, match="fit"):
+            extractor.transform(["CCO"], normalize=True)
 
-    def test_transform_with_prior_fit(self) -> None:
-        """Test that transform uses fitted normalization parameters."""
-        train_smiles = ["CCO", "c1ccccc1", "CC(=O)O"]
-        test_smiles = ["CCCC", "c1ccc(O)cc1"]
+    def test_to_dataframe_uses_feature_names(self) -> None:
+        extractor = DescriptorExtractor(
+            descriptor_names=["MolWt", "TPSA"],
+            fingerprint_type="morgan",
+            fingerprint_size=8,
+        )
+        frame = extractor.to_dataframe(["CCO", "CCN"])
 
-        extractor = MolecularDescriptorExtractor()
-
-        # Fit on train
-        X_train = extractor.fit_transform(train_smiles, normalize=True)
-
-        # Transform test with same normalization
-        X_test = extractor.transform(test_smiles, normalize=True)
-
-        assert X_train.shape[0] == 3
-        assert X_test.shape[0] == 2
-        assert X_train.shape[1] == X_test.shape[1]
-
-    def test_transform_without_fit_raises(self) -> None:
-        """Test that transform with normalize=True without fit raises error."""
-        smiles = ["CCO", "c1ccccc1"]
-        extractor = MolecularDescriptorExtractor()
-
-        with pytest.raises(RuntimeError, match="no normalization parameters"):
-            extractor.transform(smiles, normalize=True)
-
-    def test_to_dataframe(self) -> None:
-        """Test DataFrame output."""
-        smiles = ["CCO", "c1ccccc1"]
-        extractor = MolecularDescriptorExtractor()
-        df = extractor.to_dataframe(smiles)
-
-        assert len(df) == 2
-        assert list(df.columns) == extractor.descriptor_names
-
-    def test_get_valid_descriptor_mask(self) -> None:
-        """Test getting mask of valid descriptors."""
-        smiles = ["CCO", "c1ccccc1", "CC(=O)O"]
-        extractor = MolecularDescriptorExtractor()
-        X = extractor.transform(smiles)
-
-        mask = extractor.get_valid_descriptor_mask(X)
-
-        assert mask.shape == (extractor.num_descriptors,)
-        assert mask.dtype == bool
+        assert list(frame.columns) == extractor.feature_names
+        assert frame.shape == (2, 10)
