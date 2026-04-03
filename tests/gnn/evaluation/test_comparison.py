@@ -2,11 +2,15 @@
 
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+from gnn.baselines.random_forest import save_rf_model, train_rf_baseline
+from gnn.baselines.xgboost_baseline import save_xgb_model, train_xgb_baseline
 from gnn.evaluation.comparison import ModelComparison, ModelResult, compute_regression_metrics
+from scripts import compare_baselines
 
 
 class TestComputeRegressionMetrics:
@@ -107,11 +111,12 @@ class TestModelComparison:
             def predict(self, X: np.ndarray) -> np.ndarray:
                 return np.ones((len(X), 1))
 
-        comparison.add_model("Constant", ConstantPredictor())
+        comparison.add_model("Constant", ConstantPredictor(), model_type="constant")
         results = comparison.evaluate(np.zeros((3, 2)), np.ones((3, 1)))
 
         assert len(results) == 1
         assert results[0].model_name == "Constant"
+        assert results[0].metadata["model_type"] == "constant"
 
     def test_multiple_models(self) -> None:
         """Test comparing multiple models."""
@@ -164,8 +169,12 @@ class TestModelComparison:
     def test_multi_split_dataframe_uses_multiindex(self) -> None:
         comparison = ModelComparison(property_names=["prop1"])
 
-        comparison.add_result("Model1", np.array([[1.0], [2.0]]), np.array([[1.0], [2.0]]), split_name="validation")
-        comparison.add_result("Model1", np.array([[1.0], [2.0]]), np.array([[1.0], [2.0]]), split_name="test")
+        comparison.add_result(
+            "Model1", np.array([[1.0], [2.0]]), np.array([[1.0], [2.0]]), split_name="validation"
+        )
+        comparison.add_result(
+            "Model1", np.array([[1.0], [2.0]]), np.array([[1.0], [2.0]]), split_name="test"
+        )
 
         df = comparison.to_dataframe()
         assert ("validation", "Model1") in df.index
@@ -248,3 +257,232 @@ class TestModelComparison:
 
         assert result.metadata["n_estimators"] == 100
         assert result.metadata["max_depth"] == 5
+
+    def test_evaluate_all_splits(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+
+        class ConstantPredictor:
+            def predict(self, X: np.ndarray) -> np.ndarray:
+                return np.ones((len(X), 1))
+
+        comparison.add_model("Constant", ConstantPredictor(), model_type="constant")
+        results = comparison.evaluate_all_splits(
+            {
+                "random": (np.zeros((2, 3)), np.ones((2, 1))),
+                "scaffold": (np.zeros((3, 3)), np.ones((3, 1))),
+            }
+        )
+
+        assert len(results) == 2
+        df = comparison.to_dataframe()
+        assert ("random", "Constant") in df.index
+        assert ("scaffold", "Constant") in df.index
+
+    def test_evaluate_supports_datamodule_predictors(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+
+        class DatamodulePredictor:
+            def predict_datamodule(
+                self, datamodule: SimpleNamespace, *, split_name: str
+            ) -> np.ndarray:
+                del split_name
+                return np.ones_like(datamodule.test_targets)
+
+        datamodule = SimpleNamespace(test_targets=np.ones((3, 1), dtype=float))
+        comparison.add_model("Graph", DatamodulePredictor(), model_type="gnn")
+
+        results = comparison.evaluate(
+            None,
+            datamodule.test_targets,
+            split_name="test",
+            datamodule=datamodule,
+        )
+
+        assert len(results) == 1
+        assert results[0].model_name == "Graph"
+        assert results[0].metadata["model_type"] == "gnn"
+
+    def test_evaluate_all_splits_supports_datamodule_split_inputs(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+
+        class DatamodulePredictor:
+            def predict_datamodule(
+                self, datamodule: SimpleNamespace, *, split_name: str
+            ) -> np.ndarray:
+                del split_name
+                return np.ones_like(datamodule.test_targets)
+
+        comparison.add_model("Graph", DatamodulePredictor(), model_type="gnn")
+        results = comparison.evaluate_all_splits(
+            {
+                "random": {
+                    "targets": np.ones((2, 1), dtype=float),
+                    "datamodule": SimpleNamespace(test_targets=np.ones((2, 1), dtype=float)),
+                }
+            }
+        )
+
+        assert len(results) == 1
+        assert results[0].split_name == "random"
+        df = comparison.to_dataframe()
+        assert "Graph" in df.index
+
+    def test_save_report_contains_rankings_and_significance_notes(self) -> None:
+        comparison = ModelComparison(property_names=["prop1", "prop2"])
+        comparison.add_result(
+            "ModelA",
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            split_name="random",
+            metadata={"model_type": "rf"},
+        )
+        comparison.add_result(
+            "ModelB",
+            np.array([[1.2, 2.2], [2.8, 3.8]]),
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            split_name="scaffold",
+            metadata={"model_type": "xgb"},
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "comparison.md"
+            comparison.save_report(path)
+            content = path.read_text()
+
+        assert "Per-Split Rankings" in content
+        assert "Best Model Per Target" in content
+        assert "Statistical Significance Notes" in content
+
+
+class TestCompareBaselinesCliHelpers:
+    def test_parse_model_specs_supports_training_and_artifacts(self) -> None:
+        specs = compare_baselines.parse_model_specs(
+            ["rf", "SavedXGB=xgb:artifacts/xgb_model", "Graph=gnn:checkpoints/best.ckpt"]
+        )
+
+        assert [(spec.name, spec.kind, spec.source) for spec in specs] == [
+            ("RandomForest", "rf", "train"),
+            ("SavedXGB", "xgb", "artifact"),
+            ("Graph", "gnn", "artifact"),
+        ]
+        assert specs[1].path == Path("artifacts/xgb_model")
+
+    def test_parse_model_specs_rejects_duplicate_names(self) -> None:
+        with pytest.raises(ValueError, match="unique"):
+            compare_baselines.parse_model_specs(["rf", "RandomForest=rf:models/rf.joblib"])
+
+    def test_load_artifact_models_supports_rf_and_xgb(self) -> None:
+        rng = np.random.default_rng(7)
+        X = rng.normal(size=(32, 5))
+        y = np.column_stack([X[:, 0] + 0.1 * X[:, 1], X[:, 2] - 0.2 * X[:, 3]])
+        feature_names = [f"f{i}" for i in range(X.shape[1])]
+
+        rf_model = train_rf_baseline(
+            X,
+            y,
+            property_names=["logS", "logP"],
+            feature_names=feature_names,
+            n_estimators=10,
+            random_state=7,
+        )
+        xgb_model = train_xgb_baseline(
+            X,
+            y[:, 0],
+            property_names=["logS"],
+            feature_names=feature_names,
+            n_estimators=10,
+            early_stopping_rounds=None,
+            random_state=7,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            rf_path = tmp_path / "rf.joblib"
+            xgb_path = tmp_path / "xgb_model"
+            save_rf_model(rf_model, rf_path)
+            save_xgb_model(xgb_model, xgb_path)
+
+            loaded = compare_baselines.load_artifact_models(
+                compare_baselines.parse_model_specs(
+                    [f"SavedRF=rf:{rf_path}", f"SavedXGB=xgb:{xgb_path}"]
+                )
+            )
+
+            assert np.asarray(loaded["SavedRF"].predict(X[:4])).shape == (4, 2)
+            assert np.asarray(loaded["SavedXGB"].predict(X[:4])).shape == (4,)
+
+    def test_load_artifact_models_supports_gnn_loader_hook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class DummyGNNPredictor:
+            def __init__(self, path: Path) -> None:
+                self.path = path
+
+            def predict_datamodule(
+                self, datamodule: SimpleNamespace, *, split_name: str
+            ) -> np.ndarray:
+                del split_name
+                return np.zeros_like(datamodule.test_targets)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoint_path = Path(tmpdir) / "model.ckpt"
+            checkpoint_path.write_text("checkpoint")
+
+            monkeypatch.setattr(
+                compare_baselines,
+                "_import_callable",
+                lambda import_path: (lambda path: DummyGNNPredictor(path)),
+            )
+            loaded = compare_baselines.load_artifact_models(
+                compare_baselines.parse_model_specs([f"Graph=gnn:{checkpoint_path}"]),
+                gnn_loader="project.module:load_predictor",
+            )
+
+            assert isinstance(loaded["Graph"], DummyGNNPredictor)
+            assert loaded["Graph"].path == checkpoint_path
+
+    def test_predict_model_prefers_datamodule_interface(self) -> None:
+        class DatamodulePredictor:
+            def predict_datamodule(
+                self, datamodule: SimpleNamespace, *, split_name: str
+            ) -> np.ndarray:
+                del split_name
+                return np.full_like(datamodule.test_targets, 2.0)
+
+        class DatasetPredictor:
+            def predict_dataset(self, dataset: SimpleNamespace, *, split_name: str) -> np.ndarray:
+                del split_name
+                return np.ones_like(dataset.y_test)
+
+        datamodule = SimpleNamespace(test_targets=np.zeros((3, 1), dtype=float))
+        dataset = SimpleNamespace(
+            X_test=np.zeros((3, 2), dtype=float),
+            y_test=np.zeros((3, 1), dtype=float),
+        )
+        predictions = compare_baselines.predict_model(
+            DatamodulePredictor(),
+            dataset=dataset,
+            datamodule=datamodule,
+            split_name="test",
+        )
+
+        assert predictions.shape == (3, 1)
+        assert np.all(predictions == 2.0)
+
+    def test_predict_model_falls_back_to_dataset_interface(self) -> None:
+        class DatasetPredictor:
+            def predict_dataset(self, dataset: SimpleNamespace, *, split_name: str) -> np.ndarray:
+                del split_name
+                return np.ones_like(dataset.y_test)
+
+        dataset = SimpleNamespace(
+            X_test=np.zeros((3, 2), dtype=float),
+            y_test=np.zeros((3, 1), dtype=float),
+        )
+        predictions = compare_baselines.predict_model(
+            DatasetPredictor(),
+            dataset=dataset,
+            split_name="test",
+        )
+
+        assert predictions.shape == (3, 1)

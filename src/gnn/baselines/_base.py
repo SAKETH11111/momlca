@@ -119,7 +119,9 @@ class MultiOutputBaselineModel(ABC):
         if not self._is_fitted:
             raise RuntimeError("Model is not fitted. Call fit() first.")
 
-        names = self.feature_names or [f"feature_{index}" for index in range(self._n_features_in or 0)]
+        names = self.feature_names or [
+            f"feature_{index}" for index in range(self._n_features_in or 0)
+        ]
         importance_frame = pd.DataFrame(index=names)
 
         for property_name, model in self._models.items():
@@ -168,6 +170,10 @@ class MultiOutputBaselineModel(ABC):
         self._is_fitted = payload["is_fitted"]
         self._n_features_in = payload["n_features_in"]
         self._imputation_values = payload["imputation_values"]
+        if self.feature_names is not None:
+            self.moml_feature_names = list(self.feature_names)
+        self.moml_property_names = list(self.property_names)
+        self.moml_imputation_values = self._imputation_values
 
     def _validate_feature_matrix(self, X: np.ndarray) -> np.ndarray:
         array = np.asarray(X, dtype=float)

@@ -47,6 +47,28 @@ class SupportsPredict(Protocol):
         ...
 
 
+class SupportsDatasetPredict(Protocol):
+    """Protocol for predictors that consume dataset objects directly."""
+
+    def predict_dataset(self, dataset: Any, *, split_name: str) -> np.ndarray:
+        ...
+
+
+class SupportsDatamodulePredict(Protocol):
+    """Protocol for predictors that consume datamodules directly."""
+
+    def predict_datamodule(self, datamodule: Any, *, split_name: str) -> np.ndarray:
+        ...
+
+
+PredictorLike = SupportsPredict | SupportsDatasetPredict | SupportsDatamodulePredict
 Metadata = dict[str, Any]
 
-__all__ = ["BaselineModel", "Metadata", "SupportsPredict"]
+__all__ = [
+    "BaselineModel",
+    "Metadata",
+    "PredictorLike",
+    "SupportsDatamodulePredict",
+    "SupportsDatasetPredict",
+    "SupportsPredict",
+]
