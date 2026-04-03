@@ -45,3 +45,6 @@ test-full: ## Run all tests
 
 train: ## Train the model
 	python src/train.py
+
+compare-baselines: ## Train RF/XGBoost baselines and write a comparison report
+	poetry run python scripts/compare_baselines.py

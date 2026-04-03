@@ -1,0 +1,14 @@
+# Random Forest baseline configuration
+_target_: gnn.baselines.random_forest.RandomForestBaseline
+
+property_names:
+  - logS
+  - logP
+  - pKa
+
+n_estimators: 100
+max_depth: null  # Unlimited depth
+min_samples_split: 2
+min_samples_leaf: 1
+n_jobs: -1  # Use all cores
+random_state: ${seed}
