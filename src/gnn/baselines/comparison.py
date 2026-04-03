@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from gnn.baselines.protocol import Metadata, SupportsPredict
+from gnn.baselines.protocol import Metadata, PredictorLike
 from gnn.evaluation.metrics.regression import compute_regression_metrics
 
 logger = logging.getLogger(__name__)
@@ -34,37 +34,48 @@ class RegisteredModel:
     """Model registered for later comparison."""
 
     name: str
-    predictor: SupportsPredict
+    predictor: PredictorLike
+    model_type: str = "unknown"
     metadata: Metadata = field(default_factory=dict)
 
 
 class ModelComparison:
     """Evaluate multiple models on the same splits and summarize metrics."""
 
-    def __init__(self, property_names: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        property_names: list[str] | None = None,
+        *,
+        use_wandb: bool = True,
+    ) -> None:
         self.property_names = property_names or ["logS", "logP", "pKa"]
+        self.use_wandb = use_wandb
         self._models: dict[str, RegisteredModel] = {}
         self._results: list[ModelResult] = []
 
     def add_model(
         self,
         model_name: str,
-        predictor: SupportsPredict,
+        predictor: PredictorLike,
+        model_type: str | None = None,
         metadata: Metadata | None = None,
     ) -> None:
         """Register a model for later evaluation."""
         self._models[model_name] = RegisteredModel(
             name=model_name,
             predictor=predictor,
+            model_type=model_type or str((metadata or {}).get("model_type", "unknown")),
             metadata=metadata or {},
         )
 
     def evaluate(
         self,
-        X: np.ndarray,
+        X: np.ndarray | None,
         y: np.ndarray,
         *,
         split_name: str = "test",
+        dataset: Any | None = None,
+        datamodule: Any | None = None,
     ) -> list[ModelResult]:
         """Evaluate all registered models on a single split."""
         if not self._models:
@@ -72,13 +83,19 @@ class ModelComparison:
 
         results = []
         for registered in self._models.values():
-            predictions = registered.predictor.predict(X)
+            predictions = self._predict_registered_model(
+                registered.predictor,
+                X=X,
+                split_name=split_name,
+                dataset=dataset,
+                datamodule=datamodule,
+            )
             results.append(
                 self.add_result(
                     registered.name,
                     predictions,
                     y,
-                    metadata=registered.metadata,
+                    metadata={"model_type": registered.model_type, **registered.metadata},
                     split_name=split_name,
                 )
             )
@@ -89,9 +106,24 @@ class ModelComparison:
         split_map: dict[str, tuple[np.ndarray, np.ndarray]],
     ) -> list[ModelResult]:
         """Evaluate all registered models across multiple named splits."""
+        return self.evaluate_all_splits(split_map)
+
+    def evaluate_all_splits(
+        self, split_map: dict[str, tuple[np.ndarray, np.ndarray] | dict[str, Any]]
+    ) -> list[ModelResult]:
+        """Evaluate all registered models across multiple named splits."""
         all_results: list[ModelResult] = []
-        for split_name, (X_split, y_split) in split_map.items():
-            all_results.extend(self.evaluate(X_split, y_split, split_name=split_name))
+        for split_name, split_input in split_map.items():
+            X_split, y_split, dataset, datamodule = self._resolve_split_input(split_input)
+            all_results.extend(
+                self.evaluate(
+                    X_split,
+                    y_split,
+                    split_name=split_name,
+                    dataset=dataset,
+                    datamodule=datamodule,
+                )
+            )
         return all_results
 
     def add_result(
@@ -127,12 +159,17 @@ class ModelComparison:
 
     def to_dataframe(self, split_name: str | None = None) -> pd.DataFrame:
         """Convert evaluation results to a DataFrame."""
-        filtered = [result for result in self._results if split_name is None or result.split_name == split_name]
+        filtered = [
+            result
+            for result in self._results
+            if split_name is None or result.split_name == split_name
+        ]
         records = []
         for result in filtered:
             record = {
                 "model": result.model_name,
                 "split": result.split_name,
+                "model_type": result.metadata.get("model_type", "unknown"),
             }
             record.update(result.metrics)
             records.append(record)
@@ -145,15 +182,76 @@ class ModelComparison:
         metric_columns = sorted(
             column
             for column in frame.columns
-            if column not in {"model", "split"} and not column.endswith("_mean")
+            if column not in {"model", "split", "model_type"} and not column.endswith("_mean")
         )
-        ordered = ["model", "split", *mean_columns, *metric_columns]
+        ordered = ["model", "split", "model_type", *mean_columns, *metric_columns]
         frame = frame[ordered]
 
         if split_name is not None or frame["split"].nunique() == 1:
             return frame.set_index("model").drop(columns="split")
 
         return frame.set_index(["split", "model"])
+
+    def _predict_registered_model(
+        self,
+        predictor: PredictorLike,
+        *,
+        X: np.ndarray | None,
+        split_name: str,
+        dataset: Any | None,
+        datamodule: Any | None,
+    ) -> np.ndarray:
+        if hasattr(predictor, "predict_datamodule"):
+            if datamodule is None:
+                raise ValueError(
+                    "predict_datamodule(...) models require a datamodule for evaluation"
+                )
+            prediction = predictor.predict_datamodule(datamodule, split_name=split_name)
+            return np.asarray(prediction, dtype=float)
+
+        if hasattr(predictor, "predict_dataset"):
+            if dataset is None:
+                raise ValueError("predict_dataset(...) models require a dataset for evaluation")
+            prediction = predictor.predict_dataset(dataset, split_name=split_name)
+            return np.asarray(prediction, dtype=float)
+
+        if hasattr(predictor, "predict"):
+            if X is None:
+                raise ValueError("predict(X) models require a feature matrix for evaluation")
+            prediction = predictor.predict(X)
+            return np.asarray(prediction, dtype=float)
+
+        raise TypeError(
+            "Registered models must expose `predict(X)`, "
+            "`predict_dataset(dataset, split_name=...)`, or "
+            "`predict_datamodule(datamodule, split_name=...)`"
+        )
+
+    def _resolve_split_input(
+        self,
+        split_input: tuple[np.ndarray, np.ndarray] | dict[str, Any],
+    ) -> tuple[np.ndarray | None, np.ndarray, Any | None, Any | None]:
+        if isinstance(split_input, tuple):
+            X_split, y_split = split_input
+            return X_split, y_split, None, None
+
+        if "y" in split_input:
+            y_split = np.asarray(split_input["y"], dtype=float)
+        elif "targets" in split_input:
+            y_split = np.asarray(split_input["targets"], dtype=float)
+        else:
+            raise ValueError("Split dictionaries must include `y` or `targets`")
+
+        X_split = split_input.get("X")
+        if X_split is not None:
+            X_split = np.asarray(X_split, dtype=float)
+
+        return (
+            X_split,
+            y_split,
+            split_input.get("dataset"),
+            split_input.get("datamodule"),
+        )
 
     def to_table(
         self,
@@ -202,20 +300,46 @@ class ModelComparison:
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        summary = self._filter_metric_columns(self.to_dataframe(split_name=split_name), metric_types)
+        summary = self._filter_metric_columns(
+            self.to_dataframe(split_name=split_name), metric_types
+        )
+        split_ranking_tables = self._build_split_rankings(summary, split_name=split_name)
+        best_per_target = self._best_model_per_target(split_name=split_name)
         lines = [
             "# Baseline Model Comparison",
             "",
             f"Properties: {', '.join(self.property_names)}",
             "",
-            "## Metrics",
+            "## Summary",
             "",
             summary.to_markdown(floatfmt=".4f"),
         ]
 
         if not summary.empty and "mae_mean" in summary.columns:
-            best_model = self.get_best_model(metric="mae_mean", lower_is_better=True, split_name=split_name)
+            best_model = self.get_best_model(
+                metric="mae_mean", lower_is_better=True, split_name=split_name
+            )
             lines.extend(["", "## Best Model", "", f"`{best_model}` has the lowest mean MAE."])
+
+        if split_ranking_tables:
+            lines.extend(["", "## Per-Split Rankings"])
+            for name, table in split_ranking_tables.items():
+                lines.extend(["", f"### {name}", "", table.to_markdown(floatfmt=".4f")])
+
+        if best_per_target:
+            lines.extend(["", "## Best Model Per Target", ""])
+            for property_name, best_model in best_per_target.items():
+                lines.append(f"- `{property_name}`: `{best_model}`")
+
+        lines.extend(
+            [
+                "",
+                "## Statistical Significance Notes",
+                "",
+                "Statistical significance is not computed in this report yet.",
+                "Treat small metric gaps as directional unless they are confirmed with paired significance tests.",
+            ]
+        )
 
         output_path.write_text("\n".join(lines))
 
@@ -227,6 +351,9 @@ class ModelComparison:
         run: Any | None = None,
     ) -> None:
         """Log comparison results to Weights & Biases when available."""
+        if not self.use_wandb:
+            logger.info("Skipping W&B logging because comparison is in offline mode")
+            return
         frame = self.to_dataframe(split_name=split_name)
         if frame.empty:
             logger.warning("Skipping W&B logging because no comparison results were recorded")
@@ -271,8 +398,55 @@ class ModelComparison:
     ) -> pd.DataFrame:
         if frame.empty or metric_types is None:
             return frame
-        columns = [column for column in frame.columns if any(column.startswith(metric) for metric in metric_types)]
-        return frame[columns]
+        columns = [
+            column
+            for column in frame.columns
+            if any(column.startswith(metric) for metric in metric_types)
+        ]
+        passthrough = [column for column in frame.columns if column == "model_type"]
+        return frame[[*passthrough, *columns]]
+
+    def _build_split_rankings(
+        self,
+        frame: pd.DataFrame,
+        *,
+        split_name: str | None,
+    ) -> dict[str, pd.DataFrame]:
+        if frame.empty:
+            return {}
+
+        if split_name is not None or not isinstance(frame.index, pd.MultiIndex):
+            working = frame.copy()
+            if "mae_mean" in working.columns:
+                working = working.sort_values("mae_mean", ascending=True)
+            return {split_name or "overall": working}
+
+        rankings: dict[str, pd.DataFrame] = {}
+        for current_split in frame.index.get_level_values(0).unique():
+            split_frame = frame.xs(current_split, level="split").copy()
+            if "mae_mean" in split_frame.columns:
+                split_frame = split_frame.sort_values("mae_mean", ascending=True)
+            rankings[str(current_split)] = split_frame
+        return rankings
+
+    def _best_model_per_target(self, *, split_name: str | None) -> dict[str, str]:
+        frame = self.to_dataframe(split_name=split_name)
+        if frame.empty:
+            return {}
+
+        best_models: dict[str, str] = {}
+        for property_name in self.property_names:
+            metric_name = f"mae_{property_name}"
+            if metric_name not in frame.columns:
+                continue
+
+            if isinstance(frame.index, pd.MultiIndex):
+                summary = frame.groupby(level="model")[metric_name].mean()
+                best_models[property_name] = str(summary.idxmin())
+            else:
+                best_models[property_name] = str(frame[metric_name].idxmin())
+
+        return best_models
 
 
 __all__ = ["ModelComparison", "ModelResult", "RegisteredModel"]
