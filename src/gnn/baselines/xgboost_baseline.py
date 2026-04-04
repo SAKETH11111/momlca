@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import joblib
 import numpy as np
@@ -157,7 +157,10 @@ def train_xgboost_baseline(
             feature_names=feature_labels,
             **model_kwargs,
         )
-        fitted = model.fit(X_train, y_array, X_val=X_val, y_val=y_val_array)
+        fitted = cast(
+            XGBoostBaseline,
+            model.fit(X_train, y_array, X_val=X_val, y_val=y_val_array),
+        )
         fitted.moml_feature_names = feature_labels
         fitted.moml_property_names = list(property_labels)
         fitted.moml_imputation_values = fitted._imputation_values
@@ -298,7 +301,11 @@ def get_feature_importance(
         feature_names=list(names),
         expected_features=int(model.n_features_in_),
     )
-    scores = model.get_booster().get_score(importance_type=importance_type)
+    raw_scores = model.get_booster().get_score(importance_type=importance_type)
+    scores = {
+        key: float(value[0] if isinstance(value, list) else value)
+        for key, value in raw_scores.items()
+    }
     frame = pd.DataFrame({"importance": _score_vector(scores, names)}, index=names)
     return frame.sort_values("importance", ascending=False)
 

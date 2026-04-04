@@ -29,6 +29,8 @@ rdkit = "*"
 pandas = "^2.3.3"
 scikit-learn = "^1.4.0"
 xgboost = "^2.0.0"
+# Chemprop 2.x currently supports Python 3.11-3.12, so keep it gated there.
+chemprop = {version = "^2.2.2", python = ">=3.11,<3.13"}
 scipy = "^1.12.0"
 pkapredict = "^0.2.0"
 pka-predictor-moitessier = "^0.1.12"

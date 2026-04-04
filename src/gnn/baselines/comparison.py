@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -103,10 +104,10 @@ class ModelComparison:
 
     def evaluate_splits(
         self,
-        split_map: dict[str, tuple[np.ndarray, np.ndarray]],
+        split_map: Mapping[str, tuple[np.ndarray, np.ndarray]],
     ) -> list[ModelResult]:
         """Evaluate all registered models across multiple named splits."""
-        return self.evaluate_all_splits(split_map)
+        return self.evaluate_all_splits(dict(split_map))
 
     def evaluate_all_splits(
         self, split_map: dict[str, tuple[np.ndarray, np.ndarray] | dict[str, Any]]
@@ -201,17 +202,11 @@ class ModelComparison:
         dataset: Any | None,
         datamodule: Any | None,
     ) -> np.ndarray:
-        if hasattr(predictor, "predict_datamodule"):
-            if datamodule is None:
-                raise ValueError(
-                    "predict_datamodule(...) models require a datamodule for evaluation"
-                )
+        if hasattr(predictor, "predict_datamodule") and datamodule is not None:
             prediction = predictor.predict_datamodule(datamodule, split_name=split_name)
             return np.asarray(prediction, dtype=float)
 
-        if hasattr(predictor, "predict_dataset"):
-            if dataset is None:
-                raise ValueError("predict_dataset(...) models require a dataset for evaluation")
+        if hasattr(predictor, "predict_dataset") and dataset is not None:
             prediction = predictor.predict_dataset(dataset, split_name=split_name)
             return np.asarray(prediction, dtype=float)
 
@@ -220,6 +215,12 @@ class ModelComparison:
                 raise ValueError("predict(X) models require a feature matrix for evaluation")
             prediction = predictor.predict(X)
             return np.asarray(prediction, dtype=float)
+
+        if hasattr(predictor, "predict_datamodule"):
+            raise ValueError("predict_datamodule(...) models require a datamodule for evaluation")
+
+        if hasattr(predictor, "predict_dataset"):
+            raise ValueError("predict_dataset(...) models require a dataset for evaluation")
 
         raise TypeError(
             "Registered models must expose `predict(X)`, "
@@ -242,12 +243,12 @@ class ModelComparison:
         else:
             raise ValueError("Split dictionaries must include `y` or `targets`")
 
-        X_split = split_input.get("X")
-        if X_split is not None:
-            X_split = np.asarray(X_split, dtype=float)
+        feature_matrix: np.ndarray | None = split_input.get("X")
+        if feature_matrix is not None:
+            feature_matrix = np.asarray(feature_matrix, dtype=float)
 
         return (
-            X_split,
+            feature_matrix,
             y_split,
             split_input.get("dataset"),
             split_input.get("datamodule"),
