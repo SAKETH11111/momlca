@@ -6,7 +6,7 @@ import logging
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -237,7 +237,7 @@ class DescriptorExtractor:
     @staticmethod
     def descriptor_subsets() -> dict[str, list[str]]:
         """Return curated descriptor subsets used for baseline experiments."""
-        return _descriptor_subset_map()
+        return cast(dict[str, list[str]], _descriptor_subset_map())
 
     @property
     def descriptor_names(self) -> list[str]:
@@ -385,7 +385,7 @@ class DescriptorExtractor:
         fingerprint_size = nbits if nbits is not None else self.fingerprint_size
 
         if fingerprint_type == "morgan":
-            fingerprint = AllChem.GetMorganFingerprintAsBitVect(
+            fingerprint = AllChem.GetMorganFingerprintAsBitVect(  # type: ignore[attr-defined]
                 molecule,
                 radius=fingerprint_radius,
                 nBits=fingerprint_size,
@@ -395,7 +395,7 @@ class DescriptorExtractor:
             fingerprint = Chem.RDKFingerprint(molecule, fpSize=fingerprint_size)
             length = fingerprint_size
         elif fingerprint_type == "maccs":
-            fingerprint = MACCSkeys.GenMACCSKeys(molecule)
+            fingerprint = MACCSkeys.GenMACCSKeys(molecule)  # type: ignore[attr-defined]
             length = 167
         else:
             raise ValueError(f"Unsupported fingerprint_type: {fingerprint_type}")
@@ -623,6 +623,8 @@ class DescriptorExtractor:
         return prepared
 
     def _apply_normalization(self, matrix: np.ndarray) -> np.ndarray:
+        if self._normalization_means is None or self._normalization_stds is None:
+            raise RuntimeError("Normalization statistics are not initialized")
         std = np.where(self._normalization_stds == 0.0, 1.0, self._normalization_stds)
         return (matrix - self._normalization_means) / std
 

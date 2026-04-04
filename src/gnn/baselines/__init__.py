@@ -7,6 +7,13 @@ from gnn.baselines.descriptors import (
     MolecularDescriptorExtractor,
     export_pfasbench_descriptors,
 )
+from gnn.baselines.dmpnn import (
+    ChempropDMPNNBaseline,
+    load_dmpnn_model,
+    predict_dmpnn,
+    save_dmpnn_model,
+    train_dmpnn_baseline,
+)
 from gnn.baselines.models import BaselineModel, MultiOutputBaselineModel
 from gnn.baselines.random_forest import (
     RandomForestBaseline,
@@ -43,8 +50,13 @@ __all__ = [
     # Models
     "BaselineModel",
     "MultiOutputBaselineModel",
+    "ChempropDMPNNBaseline",
     "RandomForestBaseline",
     "XGBoostBaseline",
+    "train_dmpnn_baseline",
+    "predict_dmpnn",
+    "save_dmpnn_model",
+    "load_dmpnn_model",
     "train_rf_baseline",
     "predict_rf",
     "save_rf_model",
