@@ -31,7 +31,7 @@ format: ## Run pre-commit hooks
 	pre-commit run -a
 
 lint: ## Run linting (ruff check + mypy)
-	poetry run ruff check . && poetry run mypy src/
+	poetry run ruff check . && poetry run mypy src/gnn
 
 sync: ## Merge changes from main branch to your current branch
 	git pull
@@ -46,5 +46,5 @@ test-full: ## Run all tests
 train: ## Train the model
 	python src/train.py
 
-compare-baselines: ## Train RF/XGBoost baselines and write a comparison report
+compare-baselines: ## Train baseline models and write a comparison report
 	poetry run python scripts/compare_baselines.py

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import inspect
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 import numpy as np
 import rootutils
@@ -19,8 +20,10 @@ from gnn.baselines import (
     DescriptorExtractor,
     ModelComparison,
     extract_baseline_data,
+    load_dmpnn_model,
     load_rf_model,
     load_xgb_model,
+    train_dmpnn_baseline,
     train_rf_baseline,
     train_xgb_baseline,
 )
@@ -31,7 +34,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SPLIT_PRESETS: dict[str, dict[str, object]] = {
+
+class SplitPreset(TypedDict, total=False):
+    """Typed configuration for a PFASBench split preset."""
+
+    split: Literal["random", "scaffold", "pfas_ood"]
+    holdout: str
+    holdout_values: list[str]
+
+
+SPLIT_PRESETS: dict[str, SplitPreset] = {
     "random": {"split": "random"},
     "scaffold": {"split": "scaffold"},
     "pfas_ood_chain": {
@@ -58,10 +70,19 @@ SPLIT_PRESETS: dict[str, dict[str, object]] = {
 }
 
 DISPLAY_NAMES = {
+    "dmpnn": "DMPNN",
     "rf": "RandomForest",
     "xgb": "XGBoost",
     "gnn": "GNN",
 }
+
+
+def _default_models() -> list[str]:
+    """Return the default model families for the comparison CLI."""
+    models = ["rf", "xgb"]
+    if importlib.util.find_spec("chemprop") is not None:
+        models.append("dmpnn")
+    return models
 
 
 class SupportsTabularPredict(Protocol):
@@ -89,15 +110,16 @@ class ModelSpec:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    default_models = _default_models()
     parser.add_argument("--data-root", default="data", help="PFASBench root directory")
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["rf", "xgb"],
+        default=default_models,
         help=(
-            "Models to compare. Use `rf` / `xgb` to retrain baseline families, or "
-            "`name=rf:/path`, `name=xgb:/path`, `name=gnn:/path/to.ckpt` to load "
-            "pretrained artifacts."
+            "Models to compare. Use `rf` / `xgb` / `dmpnn` to retrain baseline "
+            "families, or `name=<rf|xgb|dmpnn|gnn>:/path` to load pretrained artifacts. "
+            f"Defaults to {', '.join(default_models)}."
         ),
     )
     parser.add_argument(
@@ -137,6 +159,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--rf-estimators", type=int, default=300)
     parser.add_argument("--xgb-estimators", type=int, default=500)
+    parser.add_argument("--dmpnn-epochs", type=int, default=30)
+    parser.add_argument("--dmpnn-hidden-size", type=int, default=300)
+    parser.add_argument("--dmpnn-depth", type=int, default=3)
     parser.add_argument("--disable-normalization", action="store_true")
     return parser
 
@@ -150,7 +175,7 @@ def parse_model_specs(model_args: list[str]) -> list[ModelSpec]:
 
 
 def _parse_model_spec(value: str) -> ModelSpec:
-    if value in {"rf", "xgb"}:
+    if value in {"rf", "xgb", "dmpnn"}:
         return ModelSpec(
             raw=value,
             name=DISPLAY_NAMES[value],
@@ -170,8 +195,10 @@ def _parse_model_spec(value: str) -> ModelSpec:
         )
 
     kind, path_value = remainder.split(":", maxsplit=1)
-    if kind not in {"rf", "xgb", "gnn"}:
-        raise ValueError(f"Invalid model type {kind!r} in {value!r}; expected one of rf, xgb, gnn")
+    if kind not in {"rf", "xgb", "dmpnn", "gnn"}:
+        raise ValueError(
+            f"Invalid model type {kind!r} in {value!r}; expected one of rf, xgb, dmpnn, gnn"
+        )
     path = Path(path_value).expanduser()
     return ModelSpec(raw=value, name=name, kind=kind, source="artifact", path=path)
 
@@ -195,6 +222,8 @@ def load_artifact_models(
             loaded_models[spec.name] = load_rf_model(spec.path)
         elif spec.kind == "xgb":
             loaded_models[spec.name] = load_xgb_model(spec.path)
+        elif spec.kind == "dmpnn":
+            loaded_models[spec.name] = load_dmpnn_model(spec.path)
         else:
             if gnn_loader_callable is None:
                 raise ValueError("GNN model specs require --gnn-loader package.module:callable")
@@ -312,6 +341,21 @@ def _train_model_for_split(
             random_state=seed,
         )
 
+    if spec.kind == "dmpnn":
+        return train_dmpnn_baseline(
+            dataset.smiles_train,
+            dataset.y_train,
+            smiles_val=dataset.smiles_val,
+            y_val=dataset.y_val,
+            smiles_test=dataset.smiles_test,
+            y_test=dataset.y_test,
+            property_names=dataset.property_names,
+            epochs=args.dmpnn_epochs,
+            hidden_size=args.dmpnn_hidden_size,
+            depth=args.dmpnn_depth,
+            random_state=seed,
+        )
+
     raise ValueError(f"Unsupported trainable model type: {spec.kind}")
 
 
@@ -353,6 +397,10 @@ def _model_metadata(spec: ModelSpec, args: argparse.Namespace) -> dict[str, Any]
         metadata["n_estimators"] = args.rf_estimators
     elif spec.kind == "xgb" and spec.source == "train":
         metadata["n_estimators"] = args.xgb_estimators
+    elif spec.kind == "dmpnn" and spec.source == "train":
+        metadata["epochs"] = args.dmpnn_epochs
+        metadata["hidden_size"] = args.dmpnn_hidden_size
+        metadata["depth"] = args.dmpnn_depth
     elif spec.path is not None:
         metadata["artifact_path"] = str(spec.path)
     return metadata
@@ -377,7 +425,7 @@ def _call_loader(loader: Any, path: Path) -> Any:
 
 def _maybe_start_wandb(
     *,
-    mode: str,
+    mode: Literal["disabled", "offline", "online"],
     project: str,
     report_path: Path,
     models: list[str],

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
+from typing import cast
 
 import numpy as np
 from scipy.stats import pearsonr, spearmanr
@@ -68,13 +70,17 @@ def compute_regression_metrics(
     return metrics
 
 
-def _safe_correlation(correlation_fn: object, x: np.ndarray, y: np.ndarray) -> float:
+def _safe_correlation(
+    correlation_fn: Callable[[np.ndarray, np.ndarray], object],
+    x: np.ndarray,
+    y: np.ndarray,
+) -> float:
     if len(x) < 2 or np.allclose(x, x[0]) or np.allclose(y, y[0]):
         return float("nan")
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        result = correlation_fn(x, y)
+        result = cast(tuple[float, float], correlation_fn(x, y))
     return float(result[0])
 
 

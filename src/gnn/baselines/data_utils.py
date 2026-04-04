@@ -82,18 +82,21 @@ def extract_baseline_data(
 
     if datamodule.train_idx is None:
         raise RuntimeError("Split indices not computed. Call datamodule.setup() first.")
+    if datamodule.val_idx is None or datamodule.test_idx is None:
+        raise RuntimeError("Validation/test indices not computed. Call datamodule.setup() first.")
 
     # Create extractor if needed
     if extractor is None:
         extractor = MolecularDescriptorExtractor()
 
     # Get property names from dataset
-    property_names = datamodule.dataset.property_names
+    dataset = datamodule.dataset
+    property_names = dataset.property_names
 
     # Extract SMILES for each split
-    smiles_train = [datamodule.dataset.get_smiles(int(i)) for i in datamodule.train_idx]
-    smiles_val = [datamodule.dataset.get_smiles(int(i)) for i in datamodule.val_idx]
-    smiles_test = [datamodule.dataset.get_smiles(int(i)) for i in datamodule.test_idx]
+    smiles_train = [dataset.get_smiles(int(i)) for i in datamodule.train_idx]
+    smiles_val = [dataset.get_smiles(int(i)) for i in datamodule.val_idx]
+    smiles_test = [dataset.get_smiles(int(i)) for i in datamodule.test_idx]
 
     logger.info(
         "Extracting descriptors: train=%d, val=%d, test=%d",
@@ -111,7 +114,7 @@ def extract_baseline_data(
     def get_labels(indices: np.ndarray) -> np.ndarray:
         labels = []
         for idx in indices:
-            data = datamodule.dataset[int(idx)]
+            data = dataset[int(idx)]
             # y is shape (1, num_properties), squeeze to (num_properties,)
             y = data.y.squeeze(0).numpy()
             labels.append(y)
