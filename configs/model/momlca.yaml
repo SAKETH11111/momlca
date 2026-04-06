@@ -1,0 +1,21 @@
+_target_: gnn.models.MoMLCAModel
+
+# Stable project default shell used by the canonical entrypoint.
+backbone: null
+heads: null
+
+optimizer: null
+scheduler: null
+
+learning_rate: 0.001
+weight_decay: 0.01
+
+property_names:
+  - logS
+  - logP
+  - pKa
+
+task_weights: null
+
+# compile model for faster training with pytorch 2.0
+compile: false

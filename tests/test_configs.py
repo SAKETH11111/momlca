@@ -1,4 +1,7 @@
 import hydra
+import rootutils
+from hydra import compose, initialize
+from hydra.core.global_hydra import GlobalHydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
 
@@ -35,3 +38,33 @@ def test_eval_config(cfg_eval: DictConfig) -> None:
     hydra.utils.instantiate(cfg_eval.data)
     hydra.utils.instantiate(cfg_eval.model)
     hydra.utils.instantiate(cfg_eval.trainer)
+
+
+def test_canonical_train_entrypoint_supports_gnn_overrides() -> None:
+    """The canonical train entrypoint should compose the new runtime train group."""
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=["model=painn", "data=pfasbench", "trainer.max_epochs=5"],
+        )
+        cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+
+    GlobalHydra.instance().clear()
+
+    assert cfg.train.run_train is True
+    assert cfg.train.run_test is True
+    assert cfg.model._target_ == "gnn.models.MoMLCAModel"
+    assert cfg.data._target_ == "gnn.data.datamodules.PFASBenchDataModule"
+    assert cfg.trainer.max_epochs == 5
+
+
+def test_canonical_train_entrypoint_defaults_to_project_training_stack() -> None:
+    """The canonical train config should default to the repo's GNN/PFASBench stack."""
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(config_name="config.yaml", return_hydra_config=True, overrides=[])
+
+    GlobalHydra.instance().clear()
+
+    assert cfg.model._target_ == "gnn.models.MoMLCAModel"
+    assert cfg.data._target_ == "gnn.data.datamodules.PFASBenchDataModule"
