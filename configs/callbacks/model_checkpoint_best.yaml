@@ -1,0 +1,17 @@
+model_checkpoint_best:
+  _target_: src.utils.callbacks.UniqueStateModelCheckpoint
+  state_key_suffix: "best"
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "best"
+  monitor: "val/loss"
+  verbose: False
+  save_last: False
+  save_top_k: 1
+  mode: "min"
+  auto_insert_metric_name: False
+  save_weights_only: False
+  every_n_train_steps: null
+  train_time_interval: null
+  every_n_epochs: null
+  save_on_train_epoch_end: null
+  enable_version_counter: False

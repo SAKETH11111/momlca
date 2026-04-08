@@ -25,12 +25,15 @@ def test_train_eval(tmp_path: Path, cfg_train: DictConfig, cfg_eval: DictConfig)
         cfg_train.test = True
 
     HydraConfig().set_config(cfg_train)
-    train_metric_dict, _ = train(cfg_train)
+    train_metric_dict, object_dict = train(cfg_train)
 
     assert "last.ckpt" in os.listdir(tmp_path / "checkpoints")
+    best_checkpoint = Path(object_dict["trainer"].checkpoint_callback.best_model_path)
+    assert best_checkpoint.name == "best.ckpt"
+    assert best_checkpoint.exists()
 
     with open_dict(cfg_eval):
-        cfg_eval.ckpt_path = str(tmp_path / "checkpoints" / "last.ckpt")
+        cfg_eval.ckpt_path = str(best_checkpoint)
 
     HydraConfig().set_config(cfg_eval)
     test_metric_dict, _ = evaluate(cfg_eval)
