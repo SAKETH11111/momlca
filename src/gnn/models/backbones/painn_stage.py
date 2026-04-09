@@ -10,8 +10,8 @@ from torch_geometric.data import Batch
 class PaiNNStageBackbone(nn.Module):
     """Lightweight graph backbone that reserves a distinct `model=painn` path.
 
-    This is intentionally a small shell so the Hydra config tree can
-    expose a dedicated PaiNN branch before the full equivariant implementation is
+    This is intentionally a small shell so the Hydra config tree can expose a
+    dedicated PaiNN branch before the full equivariant implementation is
     delivered.
     """
 

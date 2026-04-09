@@ -1,7 +1,7 @@
 # Weights & Biases via Lightning WandbLogger.
 # Example: python scripts/train.py model=painn data=pfasbench logger=wandb
 #
-# Checkpoints stay under ${paths.output_dir}/checkpoints . To optionally upload
+# Checkpoints stay under ${paths.output_dir}/checkpoints. To optionally upload
 # those checkpoints as W&B artifacts, set log_model: true (end of run) or log_model: "all"
 # (during training) — Lightning handles upload; paths are not relocated.
 #
