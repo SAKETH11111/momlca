@@ -2,6 +2,7 @@
 
 Examples:
     python scripts/train.py model=painn data=pfasbench
+    python scripts/train.py --multirun seed=42,43,44 model=painn data=pfasbench
     python scripts/train.py model=painn data=pfasbench trainer.max_epochs=5
 """
 

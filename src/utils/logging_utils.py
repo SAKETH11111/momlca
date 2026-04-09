@@ -1,9 +1,10 @@
 import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from lightning_utilities.core.rank_zero import rank_zero_only
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
 
 from src.utils import pylogger
 
@@ -91,6 +92,106 @@ def _maybe_wandb_log_code(
             run.log_code(str(repo_root))
         except Exception:
             log.exception("wandb log_code failed; continuing training.")
+
+
+def apply_wandb_multirun_metadata(
+    cfg: Any,
+    *,
+    group_name: str,
+    job_type: str = "multiseed-child",
+) -> None:
+    """Inject deterministic group metadata into the configured W&B logger."""
+    wandb_cfg = OmegaConf.select(cfg, "logger.wandb", default=None)
+    if wandb_cfg is None:
+        return
+
+    with open_dict(cfg):
+        if not OmegaConf.select(cfg, "logger.wandb.group", default=""):
+            cfg.logger.wandb.group = group_name
+        if not OmegaConf.select(cfg, "logger.wandb.job_type", default=""):
+            cfg.logger.wandb.job_type = job_type
+
+
+def log_multiseed_summary_to_wandb(
+    loggers: Sequence[Any],
+    summary_payload: Mapping[str, Any],
+    *,
+    prefix: str = "multiseed",
+) -> None:
+    """Log sweep-level multi-seed summaries through any configured W&B logger."""
+    if not loggers:
+        return
+
+    per_run_rows = summary_payload.get("runs") or []
+    aggregate_stats = summary_payload.get("aggregate_stats") or {}
+    artifacts = summary_payload.get("artifacts") or {}
+
+    for logger in loggers:
+        wandb_init = getattr(logger, "_wandb_init", None)
+        experiment = getattr(logger, "experiment", None)
+        summary = getattr(experiment, "summary", None) if experiment is not None else None
+        if not isinstance(wandb_init, dict) or experiment is None or summary is None:
+            continue
+
+        summary[f"{prefix}/group"] = summary_payload.get("group_name", "")
+        summary[f"{prefix}/run_count"] = int(summary_payload.get("run_count", 0))
+        for artifact_name, artifact_path in artifacts.items():
+            summary[f"{prefix}/artifacts/{artifact_name}"] = artifact_path
+        for metric_name, stats in aggregate_stats.items():
+            for stat_name, value in stats.items():
+                if value is not None:
+                    summary[f"{prefix}/{metric_name}/{stat_name}"] = value
+
+        try:
+            import wandb
+
+            if per_run_rows and hasattr(experiment, "log"):
+                per_run_columns = [
+                    "job_num",
+                    "seed",
+                    "data_seed",
+                    "checkpoint_path",
+                    "metrics",
+                ]
+                per_run_data = [
+                    [
+                        row.get("job_num", ""),
+                        row.get("seed"),
+                        row.get("data_seed"),
+                        row.get("checkpoint_path", ""),
+                        json_safe_metrics(row.get("metrics") or {}),
+                    ]
+                    for row in per_run_rows
+                ]
+                aggregate_columns = ["metric", "n", "mean", "std", "ci95"]
+                aggregate_data = [
+                    [
+                        metric_name,
+                        stats.get("n"),
+                        stats.get("mean"),
+                        stats.get("std"),
+                        stats.get("ci95"),
+                    ]
+                    for metric_name, stats in aggregate_stats.items()
+                ]
+                experiment.log(
+                    {
+                        f"{prefix}/per_run": wandb.Table(
+                            columns=per_run_columns, data=per_run_data
+                        ),
+                        f"{prefix}/aggregate": wandb.Table(
+                            columns=aggregate_columns, data=aggregate_data
+                        ),
+                    }
+                )
+        except Exception:
+            log.exception("Failed to log multi-seed W&B summary; continuing training.")
+
+
+def json_safe_metrics(metrics: Mapping[str, Any]) -> str:
+    """Render metric key/value pairs for compact W&B table display."""
+    pairs = [f"{metric}={value:.4f}" for metric, value in sorted(metrics.items())]
+    return ", ".join(pairs)
 
 
 @rank_zero_only

@@ -28,13 +28,16 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 from src.utils import (
     RankedLogger,
+    apply_wandb_multirun_metadata,
     extras,
+    finalize_multiseed_run,
     get_metric_value,
     instantiate_callbacks,
     instantiate_loggers,
     log_hyperparameters,
     task_wrapper,
 )
+from src.utils.multirun import detect_multirun_context
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -63,6 +66,7 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     :return: A tuple with metrics and dict with all instantiated objects.
     """
     runtime_cfg = cfg.train
+    multirun_context = detect_multirun_context(cfg)
 
     # set seed for random number generators in pytorch, numpy and python.random
     seed = _cfg_value(cfg, runtime_cfg, "seed", "seed")
@@ -77,6 +81,9 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
     log.info("Instantiating callbacks...")
     callbacks: list[Callback] = instantiate_callbacks(cfg.get("callbacks"))
+
+    if multirun_context is not None:
+        apply_wandb_multirun_metadata(cfg, group_name=multirun_context.group_name)
 
     log.info("Instantiating loggers...")
     logger: list[Logger] = instantiate_loggers(cfg.get("logger"))
@@ -127,6 +134,13 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
     # merge train and test metrics
     metric_dict = {**train_metrics, **test_metrics}
+    finalize_multiseed_run(
+        cfg,
+        trainer,
+        metric_dict,
+        logger,
+        context=multirun_context,
+    )
 
     return metric_dict, object_dict
 

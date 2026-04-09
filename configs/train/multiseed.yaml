@@ -1,6 +1,12 @@
+# Optional training preset for documented multi-seed runs. The canonical CLI remains:
+#   python scripts/train.py --multirun seed=42,43,44 model=painn data=pfasbench
+#
+# This preset simply enables the multiseed metadata/reporting knobs explicitly when
+# callers prefer `train=multiseed`.
+
 task_name: train
 
-tags: ["dev"]
+tags: ["dev", "multiseed"]
 
 run_train: true
 run_test: true
@@ -10,7 +16,7 @@ seed: null
 optimized_metric: null
 
 multiseed:
-  enabled: null
+  enabled: true
   sweep_dir: null
   job_num: null
   metrics_filename: multiseed_metrics.json

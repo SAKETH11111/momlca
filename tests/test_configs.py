@@ -60,6 +60,22 @@ def test_canonical_train_entrypoint_supports_gnn_overrides() -> None:
     assert cfg.trainer.max_epochs == 5
 
 
+def test_multiseed_train_preset_composes_with_canonical_entrypoint() -> None:
+    """The optional multiseed train preset should compose without changing the entrypoint."""
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=["train=multiseed"],
+        )
+
+    GlobalHydra.instance().clear()
+
+    assert cfg.train.multiseed.enabled is True
+    assert cfg.train.multiseed.metrics_filename == "multiseed_metrics.json"
+    assert "multiseed" in cfg.train.tags
+
+
 def test_canonical_train_entrypoint_defaults_to_project_training_stack() -> None:
     """The canonical train config should default to the repo's GNN/PFASBench stack."""
     with initialize(version_base="1.3", config_path="../configs"):
