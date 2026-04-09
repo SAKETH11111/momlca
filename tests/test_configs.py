@@ -1,4 +1,5 @@
 import hydra
+import pytest
 import rootutils
 from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
@@ -68,3 +69,22 @@ def test_canonical_train_entrypoint_defaults_to_project_training_stack() -> None
 
     assert cfg.model._target_ == "gnn.models.MoMLCAModel"
     assert cfg.data._target_ == "gnn.data.datamodules.PFASBenchDataModule"
+
+
+@pytest.mark.parametrize("logger_name", ["wandb", "tensorboard", "many_loggers"])
+def test_logger_presets_compose_with_canonical_config(logger_name: str) -> None:
+    """Logger groups should compose with the canonical Hydra entrypoint."""
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=[f"logger={logger_name}"],
+        )
+
+    GlobalHydra.instance().clear()
+
+    assert cfg.logger is not None
+    if logger_name in ("wandb", "many_loggers"):
+        assert cfg.logger.wandb.project == "moml"
+    if logger_name == "tensorboard":
+        assert "tensorboard" in cfg.logger
