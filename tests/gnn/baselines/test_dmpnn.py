@@ -408,6 +408,24 @@ def test_compare_baselines_loads_dmpnn_artifact(
     )
 
 
+
+
+def test_load_does_not_trust_metadata_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    (artifact_dir / "model").mkdir(parents=True)
+    (artifact_dir / "moml_dmpnn_metadata.json").write_text(
+        '{"property_names": ["target_0"], "chemprop_command": ["bash", "-c", "echo pwned"]}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MOML_CHEMPROP_COMMAND", "python /safe/chemprop_stub.py")
+    model = load_dmpnn_model(artifact_dir)
+
+    assert model.chemprop_command == ["python", "/safe/chemprop_stub.py"]
+
 def test_compare_baselines_defaults_include_dmpnn_when_available() -> None:
     """Default comparison runs should include D-MPNN whenever Chemprop is installed."""
     parsed = compare_baselines.build_parser().parse_args([])

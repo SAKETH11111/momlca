@@ -288,10 +288,17 @@ def load_dmpnn_model(path: str | Path) -> ChempropDMPNNBaseline:
         raise FileNotFoundError(f"Missing D-MPNN metadata: {metadata_path}")
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if "property_names" not in metadata:
+        raise KeyError(f"Missing D-MPNN metadata field: property_names in {metadata_path}")
+
+    # Never execute a command loaded from model metadata. Resolve the Chemprop
+    # executable from trusted local configuration instead.
+    command_prefix = _resolve_chemprop_command(None)
+
     return ChempropDMPNNBaseline(
         artifact_dir=artifact_dir,
         property_names=list(metadata["property_names"]),
-        chemprop_command=list(metadata["chemprop_command"]),
+        chemprop_command=command_prefix,
     )
 
 
