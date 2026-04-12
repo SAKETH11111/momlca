@@ -76,6 +76,40 @@ def test_multiseed_train_preset_composes_with_canonical_entrypoint() -> None:
     assert "multiseed" in cfg.train.tags
 
 
+@pytest.mark.parametrize(
+    ("experiment_name", "expected_backbone_target"),
+    [
+        ("pfasbench_finetune", "gnn.models.backbones.PaiNNStageBackbone"),
+        ("pfasbench_finetune_momlca", None),
+    ],
+)
+def test_finetune_experiments_compose_with_lower_lr_and_pretrained_backbone(
+    experiment_name: str, expected_backbone_target: str | None
+) -> None:
+    """Fine-tune experiments should stay on the canonical entrypoint and expose transfer config."""
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=[
+                f"experiment={experiment_name}",
+                "model.pretrained_backbone.checkpoint_path=/tmp/pretrained.ckpt",
+            ],
+        )
+
+    GlobalHydra.instance().clear()
+
+    assert cfg.model._target_ == "gnn.models.MoMLCAModel"
+    assert cfg.model.learning_rate == 0.0001
+    assert cfg.model.pretrained_backbone.checkpoint_path == "/tmp/pretrained.ckpt"
+    assert cfg.model.pretrained_backbone.checkpoint_format == "lightning"
+    assert cfg.ckpt_path is None
+    if expected_backbone_target is None:
+        assert cfg.model.backbone is None
+    else:
+        assert cfg.model.backbone._target_ == expected_backbone_target
+
+
 def test_canonical_train_entrypoint_defaults_to_project_training_stack() -> None:
     """The canonical train config should default to the repo's GNN/PFASBench stack."""
     with initialize(version_base="1.3", config_path="../configs"):

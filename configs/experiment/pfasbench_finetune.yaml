@@ -1,0 +1,27 @@
+# @package _global_
+
+# Run with:
+# python scripts/train.py experiment=pfasbench_finetune \
+#   model.pretrained_backbone.checkpoint_path=/abs/path/to/pretrained.ckpt
+
+defaults:
+  - override /data: pfasbench
+  - override /model: painn
+  - override /callbacks: default
+  - override /trainer: default
+
+tags: ["pfasbench", "finetune"]
+
+seed: 12345
+
+trainer:
+  max_epochs: 10
+
+model:
+  learning_rate: 0.0001
+  pretrained_backbone:
+    checkpoint_path: ???
+    checkpoint_format: lightning
+    backbone_key_prefix: backbone.
+    freeze_backbone: false
+

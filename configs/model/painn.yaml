@@ -22,5 +22,11 @@ property_names:
 
 task_weights: null
 
+pretrained_backbone:
+  checkpoint_path: null
+  checkpoint_format: lightning
+  backbone_key_prefix: backbone.
+  freeze_backbone: false
+
 # compile model for faster training with pytorch 2.0
 compile: false

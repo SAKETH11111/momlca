@@ -6,7 +6,7 @@ import lightning as L
 import rootutils
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, open_dict
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -54,6 +54,31 @@ def _cfg_value(cfg: DictConfig, runtime_cfg: DictConfig, key: str, runtime_key: 
     return runtime_cfg.get(runtime_key)
 
 
+def _disable_pretrained_backbone_for_resume(
+    cfg: DictConfig, runtime_cfg: DictConfig
+) -> str | None:
+    """Skip transfer-learning init when exact checkpoint resume is requested."""
+    ckpt_path = _cfg_value(cfg, runtime_cfg, "ckpt_path", "ckpt_path")
+    if ckpt_path in (None, ""):
+        return None
+
+    model_cfg = cfg.get("model")
+    if model_cfg is None:
+        return None
+
+    pretrained_backbone_cfg = model_cfg.get("pretrained_backbone")
+    if pretrained_backbone_cfg is None:
+        return None
+
+    checkpoint_path = pretrained_backbone_cfg.get("checkpoint_path")
+    if checkpoint_path in (None, ""):
+        return None
+
+    with open_dict(model_cfg):
+        model_cfg.pretrained_backbone.checkpoint_path = None
+    return str(checkpoint_path)
+
+
 @task_wrapper
 def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Trains the model. Can additionally evaluate on a testset, using best weights obtained during
@@ -72,6 +97,13 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     seed = _cfg_value(cfg, runtime_cfg, "seed", "seed")
     if seed is not None:
         L.seed_everything(seed, workers=True)
+
+    skipped_pretrained_checkpoint = _disable_pretrained_backbone_for_resume(cfg, runtime_cfg)
+    if skipped_pretrained_checkpoint is not None:
+        log.info(
+            "Skipping pretrained backbone initialization because ckpt_path resume takes "
+            f"precedence: {skipped_pretrained_checkpoint}"
+        )
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)

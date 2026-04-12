@@ -100,6 +100,164 @@ def test_train_script_uses_canonical_config_and_persists_resolved_hydra_config(
     assert second_probe["global_step"] == first_global_step
 
 
+def test_train_script_accepts_finetune_config_without_overloading_resume_ckpt(
+    tmp_path: Path,
+) -> None:
+    """The canonical script should accept pretrained-backbone init separately from ckpt_path."""
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+    run_dir = tmp_path / "finetune-run"
+    pretrained_path = tmp_path / "pretrained-backbone.pt"
+    torch.save(
+        {
+            "backbone.linear.weight": torch.full((4, 22), 1.75),
+            "backbone.linear.bias": torch.full((4,), -0.25),
+        },
+        pretrained_path,
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/train.py",
+            "model=momlca",
+            "data=pfasbench",
+            "train.run_test=false",
+            "trainer.accelerator=cpu",
+            "trainer.devices=1",
+            "trainer.max_epochs=1",
+            "+trainer.limit_train_batches=1",
+            "+trainer.limit_val_batches=1",
+            "+trainer.num_sanity_val_steps=0",
+            "data.batch_size=2",
+            "data.num_workers=0",
+            "data.root=" + str(dataset_root),
+            "data.split=random",
+            "data.train_frac=0.5",
+            "data.val_frac=0.25",
+            "data.test_frac=0.25",
+            "+model.backbone._target_=tests.helpers.transfer_learning.TinyBackbone",
+            "+model.backbone.input_dim=22",
+            "+model.backbone.hidden_dim=4",
+            "model.learning_rate=0.0001",
+            "model.pretrained_backbone.checkpoint_path=" + str(pretrained_path),
+            "model.pretrained_backbone.checkpoint_format=state_dict",
+            "model.pretrained_backbone.backbone_key_prefix=backbone.",
+            "model.pretrained_backbone.freeze_backbone=true",
+            "extras.print_config=false",
+            "extras.enforce_tags=false",
+            "hydra.run.dir=" + str(run_dir),
+        ],
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+
+    hydra_config = run_dir / ".hydra" / "config.yaml"
+    assert hydra_config.exists()
+
+    resolved_cfg = yaml.safe_load(hydra_config.read_text())
+    assert resolved_cfg["ckpt_path"] == "${train.ckpt_path}"
+    assert resolved_cfg["train"]["ckpt_path"] is None
+    assert resolved_cfg["model"]["learning_rate"] == 0.0001
+    assert (
+        resolved_cfg["model"]["pretrained_backbone"]["checkpoint_path"]
+        == str(pretrained_path)
+    )
+    assert resolved_cfg["model"]["pretrained_backbone"]["freeze_backbone"] is True
+
+    checkpoint_dir = run_dir / "checkpoints"
+    last_checkpoint = torch.load(
+        checkpoint_dir / "last.ckpt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert torch.equal(
+        last_checkpoint["state_dict"]["backbone.linear.weight"],
+        torch.full((4, 22), 1.75),
+    )
+    assert torch.equal(
+        last_checkpoint["state_dict"]["backbone.linear.bias"],
+        torch.full((4,), -0.25),
+    )
+
+
+def test_train_script_resolves_relative_pretrained_checkpoint_paths(
+    tmp_path: Path,
+) -> None:
+    """Fine-tune presets should accept repo-relative checkpoint paths under Hydra run dirs."""
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+    run_dir = tmp_path / "relative-finetune-run"
+    pretrained_dir = tmp_path / "pretrained"
+    pretrained_dir.mkdir()
+    pretrained_path = pretrained_dir / "pretrained-backbone.pt"
+    torch.save(
+        {
+            "backbone.linear.weight": torch.full((4, 22), 2.25),
+            "backbone.linear.bias": torch.full((4,), 0.5),
+        },
+        pretrained_path,
+    )
+    relative_pretrained_path = pretrained_path.relative_to(tmp_path)
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "train.py"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "experiment=pfasbench_finetune_momlca",
+            "train.run_test=false",
+            "trainer.accelerator=cpu",
+            "trainer.devices=1",
+            "trainer.max_epochs=1",
+            "+trainer.limit_train_batches=1",
+            "+trainer.limit_val_batches=1",
+            "+trainer.num_sanity_val_steps=0",
+            "data.batch_size=2",
+            "data.num_workers=0",
+            "data.root=" + str(dataset_root),
+            "data.split=random",
+            "data.train_frac=0.5",
+            "data.val_frac=0.25",
+            "data.test_frac=0.25",
+            "+model.backbone._target_=tests.helpers.transfer_learning.TinyBackbone",
+            "+model.backbone.input_dim=22",
+            "+model.backbone.hidden_dim=4",
+            "model.pretrained_backbone.checkpoint_path=" + relative_pretrained_path.as_posix(),
+            "model.pretrained_backbone.checkpoint_format=state_dict",
+            "model.pretrained_backbone.freeze_backbone=true",
+            "extras.print_config=false",
+            "extras.enforce_tags=false",
+            "hydra.run.dir=" + str(run_dir),
+        ],
+        check=True,
+        cwd=tmp_path,
+    )
+
+    hydra_config = run_dir / ".hydra" / "config.yaml"
+    assert hydra_config.exists()
+
+    resolved_cfg = yaml.safe_load(hydra_config.read_text())
+    assert resolved_cfg["model"]["_target_"] == "gnn.models.MoMLCAModel"
+    assert resolved_cfg["model"]["learning_rate"] == 0.0001
+    assert (
+        resolved_cfg["model"]["pretrained_backbone"]["checkpoint_path"]
+        == relative_pretrained_path.as_posix()
+    )
+
+    last_checkpoint = torch.load(
+        run_dir / "checkpoints" / "last.ckpt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert torch.equal(
+        last_checkpoint["state_dict"]["backbone.linear.weight"],
+        torch.full((4, 22), 2.25),
+    )
+    assert torch.equal(
+        last_checkpoint["state_dict"]["backbone.linear.bias"],
+        torch.full((4,), 0.5),
+    )
+
+
 @pytest.mark.skipif(
     importlib.util.find_spec("tensorboard") is None
     and importlib.util.find_spec("tensorboardX") is None,
