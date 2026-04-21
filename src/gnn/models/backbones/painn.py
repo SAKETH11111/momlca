@@ -117,6 +117,10 @@ class PaiNNBackbone(BaseBackbone):
                 trainable=self.rbf_trainable,
             )
         if self.radial_basis == "bessel":
+            if self.rbf_trainable:
+                raise ValueError(
+                    "PaiNNBackbone does not support rbf_trainable=True when radial_basis='bessel'."
+                )
             return schnetpack_modules["BesselRBF"](
                 n_rbf=self.num_rbf,
                 cutoff=self.cutoff,
@@ -181,11 +185,11 @@ class PaiNNBackbone(BaseBackbone):
     def _build_schnetpack_inputs(
         self, batch: Batch, atomic_numbers: torch.Tensor
     ) -> dict[str, Any]:
-        edge_index = batch.edge_index
-        if edge_index.ndim != 2 or edge_index.shape[0] != 2:
-            raise ValueError(
-                "PaiNNBackbone expects edge_index with shape [2, num_edges] in each batch."
-            )
+        batch_index = getattr(batch, "batch", None)
+        if batch_index is None:
+            batch_index = torch.zeros(batch.x.shape[0], dtype=torch.long, device=batch.x.device)
+
+        edge_index = self._build_radius_edge_index(batch.pos, batch_index)
 
         idx_i = edge_index[1].long()
         idx_j = edge_index[0].long()
@@ -201,6 +205,36 @@ class PaiNNBackbone(BaseBackbone):
             self._property_rij: r_ij,
         }
 
+    def _build_radius_edge_index(
+        self,
+        positions: torch.Tensor,
+        batch_index: torch.Tensor,
+    ) -> torch.Tensor:
+        edge_blocks: list[torch.Tensor] = []
+        for graph_index in batch_index.unique(sorted=True):
+            node_indices = torch.nonzero(batch_index == graph_index, as_tuple=False).flatten()
+            if node_indices.numel() <= 1:
+                continue
+
+            graph_positions = positions[node_indices]
+            distance_matrix = torch.cdist(graph_positions, graph_positions)
+            neighbor_mask = distance_matrix <= self.cutoff
+            neighbor_mask.fill_diagonal_(False)
+            target_nodes, source_nodes = torch.nonzero(neighbor_mask, as_tuple=True)
+            if target_nodes.numel() == 0:
+                continue
+
+            edge_blocks.append(
+                torch.stack(
+                    (node_indices[source_nodes], node_indices[target_nodes]),
+                    dim=0,
+                )
+            )
+
+        if edge_blocks:
+            return torch.cat(edge_blocks, dim=1)
+        return torch.empty((2, 0), dtype=torch.long, device=positions.device)
+
     def forward(self, batch: Batch) -> BackboneOutput:
         """Encode a molecular graph batch into equivariant node and invariant graph features."""
         if getattr(batch, "pos", None) is None:
@@ -214,7 +248,6 @@ class PaiNNBackbone(BaseBackbone):
         schnetpack_inputs = self._build_schnetpack_inputs(batch, atomic_numbers)
         schnetpack_outputs = self.representation(schnetpack_inputs)
         scalar_features = schnetpack_outputs["scalar_representation"]
-        vector_features = schnetpack_outputs["vector_representation"]
         batch_index = getattr(batch, "batch", None)
         if batch_index is None:
             batch_index = torch.zeros(batch.x.shape[0], dtype=torch.long, device=batch.x.device)
@@ -222,7 +255,7 @@ class PaiNNBackbone(BaseBackbone):
         graph_features = self._pool(scalar_features, batch_index)
 
         return {
-            "node_features": vector_features,
+            "node_features": scalar_features,
             "graph_features": graph_features,
         }
 
