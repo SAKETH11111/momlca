@@ -17,6 +17,7 @@ import torch
 from rdkit import Chem
 from torch_geometric.data import Data, InMemoryDataset
 
+from gnn.data.datasets.registry import register_dataset
 from gnn.data.loaders import load_sdf, load_smiles
 from gnn.data.transforms import mol_to_pyg_data
 from gnn.exceptions import FeaturizationError, InvalidSMILESError
@@ -29,6 +30,7 @@ def _stable_conformer_seed(smiles: str) -> int:
     return zlib.crc32(smiles.encode("utf-8")) & 0x7FFFFFFF
 
 
+@register_dataset("pfasbench")
 class PFASBenchDataset(InMemoryDataset):
     """PFASBench: A benchmark dataset for PFAS property prediction.
 

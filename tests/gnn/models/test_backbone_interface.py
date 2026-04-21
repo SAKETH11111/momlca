@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import get_type_hints
+from uuid import uuid4
 
 import pytest
 import torch
@@ -21,7 +22,9 @@ from gnn.models.backbones import (
     GINBackbone,
     PaiNNBackbone,
     PaiNNStageBackbone,
+    get_backbone,
     get_backbone_class,
+    register_backbone,
     registered_backbones,
 )
 
@@ -134,12 +137,42 @@ def test_gin_backbone_rejects_unknown_pooling_mode() -> None:
 
 def test_builtin_backbones_are_registered_for_lookup_by_name() -> None:
     """Built-in backbones should be discoverable through the shared registry."""
+    assert get_backbone("gin") is GINBackbone
     assert get_backbone_class("gin") is GINBackbone
     assert get_backbone_class("painn") is PaiNNBackbone
     assert get_backbone_class("painn_stage") is PaiNNStageBackbone
     assert registered_backbones()["gin"] is GINBackbone
     assert registered_backbones()["painn"] is PaiNNBackbone
     assert registered_backbones()["painn_stage"] is PaiNNStageBackbone
+
+
+def test_backbone_registry_supports_runtime_extension_registration() -> None:
+    """Runtime backbones should be registerable without changing package imports."""
+    runtime_name = f"runtime_backbone_{uuid4().hex}"
+
+    @register_backbone(runtime_name)
+    class _RuntimeBackbone(BaseBackbone):
+        @property
+        def output_dim(self) -> int:
+            return 1
+
+        def forward(self, batch: Batch) -> BackboneOutput:
+            node_features = torch.ones((batch.x.shape[0], 1), dtype=torch.float32)
+            graph_features = torch.ones((batch.num_graphs, 1), dtype=torch.float32)
+            return {"node_features": node_features, "graph_features": graph_features}
+
+    assert get_backbone_class(runtime_name.upper()) is _RuntimeBackbone
+    assert registered_backbones()[runtime_name] is _RuntimeBackbone
+
+
+def test_backbone_registry_unknown_name_errors_include_available_entries() -> None:
+    """Unknown backbone lookups should surface available options for fast recovery."""
+    with pytest.raises(KeyError) as exc:
+        get_backbone_class("not_a_real_backbone")
+
+    message = str(exc.value)
+    assert "Available backbones:" in message
+    assert "gin" in message
 
 
 def test_registry_module_resolves_builtin_backbones_without_package_import_side_effects() -> None:
@@ -153,8 +186,9 @@ def test_registry_module_resolves_builtin_backbones_without_package_import_side_
             "-c",
             (
                 "import json\n"
-                "from gnn.models.backbones.registry import get_backbone_class, registered_backbones\n"
+                "from gnn.models.backbones.registry import get_backbone, get_backbone_class, registered_backbones\n"
                 "print(json.dumps({"
+                '"gin_alias": get_backbone("gin").__name__, '
                 '"gin": get_backbone_class("gin").__name__, '
                 '"painn": get_backbone_class("painn").__name__, '
                 '"painn_stage": get_backbone_class("painn_stage").__name__, '
@@ -171,6 +205,7 @@ def test_registry_module_resolves_builtin_backbones_without_package_import_side_
 
     payload = json.loads(result.stdout)
     assert payload == {
+        "gin_alias": "GINBackbone",
         "gin": "GINBackbone",
         "painn": "PaiNNBackbone",
         "painn_stage": "PaiNNStageBackbone",
