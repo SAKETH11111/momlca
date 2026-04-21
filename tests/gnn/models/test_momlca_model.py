@@ -17,7 +17,13 @@ from torch import nn
 from torch_geometric.data import Batch, Data
 
 from gnn.data.datamodules import PFASBenchDataModule
-from gnn.models import GINBackbone, MoMLCAModel, PaiNNBackbone, PaiNNStageBackbone
+from gnn.models import (
+    GINBackbone,
+    MoMLCAModel,
+    PaiNNBackbone,
+    PaiNNStageBackbone,
+    PropertyHead,
+)
 from gnn.models.backbones import BaseBackbone
 from src.train import train
 from tests.helpers.transfer_learning import TinyBackbone
@@ -213,6 +219,64 @@ def test_forward_routes_backbone_outputs_to_named_heads() -> None:
     assert property_head.last_inputs is not None
     assert torch.equal(property_head.last_inputs, outputs["backbone"]["graph_features"])
     assert outputs["predictions"]["property"].shape == (batch.num_graphs, 3)
+
+
+def test_model_uses_property_head_by_default() -> None:
+    """The default head path should instantiate the graph-level PropertyHead."""
+    model = MoMLCAModel(
+        backbone=RecordingBackbone(),
+        property_names=["logS", "logP", "pKa"],
+    )
+
+    outputs = model.forward(make_batch())
+
+    assert isinstance(model.heads["property"], PropertyHead)
+    assert model.heads["property"].input_dim == model.backbone.output_dim
+    assert isinstance(outputs["predictions"]["property"], torch.Tensor)
+    assert outputs["predictions"]["property"].shape == (2, 3)
+
+
+def test_model_accepts_property_head_mapping_outputs_with_prediction_tensor() -> None:
+    """Property heads may return mappings as long as they expose tensor predictions."""
+    batch = make_batch()
+    model = MoMLCAModel(
+        backbone=RecordingBackbone(),
+        heads={
+            "property": PropertyHead(
+                input_dim=RecordingBackbone().output_dim,
+                output_dim=3,
+                hidden_dims=(4,),
+                uncertainty=True,
+            )
+        },
+        property_names=["logS", "logP", "pKa"],
+    )
+
+    outputs = model.forward(batch)
+    property_outputs = outputs["predictions"]["property"]
+    loss = model.training_step(batch, batch_idx=0)
+
+    assert isinstance(property_outputs, dict)
+    assert property_outputs["predictions"].shape == (batch.num_graphs, 3)
+    assert property_outputs["log_variance"].shape == (batch.num_graphs, 3)
+    assert loss.shape == torch.Size([])
+
+
+def test_model_rejects_non_tensor_log_variance_in_mapping_outputs() -> None:
+    """Mapped head outputs may include ``log_variance`` only when it is tensor-valued."""
+    model = MoMLCAModel(
+        backbone=RecordingBackbone(),
+        property_names=["logS", "logP", "pKa"],
+    )
+    with pytest.raises(
+        ValueError, match="Head output mappings may include a tensor-valued 'log_variance' entry"
+    ):
+        model._extract_prediction_tensor(
+            {
+                "predictions": torch.randn(2, 3),
+                "log_variance": "not-a-tensor",
+            }
+        )
 
 
 def test_step_methods_mask_nan_targets_and_log_regression_metrics() -> None:
