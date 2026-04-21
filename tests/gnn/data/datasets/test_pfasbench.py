@@ -9,9 +9,11 @@ from pathlib import Path
 
 import pytest
 import torch
+from rdkit import Chem
 from torch_geometric.data import Data
 
 from gnn.data.datasets import PFASBenchDataset
+from gnn.data.transforms import mol_to_pyg_data
 
 
 @pytest.fixture
@@ -96,6 +98,9 @@ class TestPFASBenchDataset:
         assert hasattr(data, "smiles")
         assert hasattr(data, "name")
         assert hasattr(data, "inchikey")
+        assert hasattr(data, "pos")
+        assert isinstance(data.pos, torch.Tensor)
+        assert data.pos.shape == (data.num_nodes, 3)
 
     def test_x_is_float_tensor(self, temp_dataset_dir: Path) -> None:
         """Test that atom features are float tensor."""
@@ -173,6 +178,55 @@ class TestPFASBenchDatasetCaching:
         monkeypatch.setattr(PFASBenchDataset, "process", fail_process)
         dataset2 = PFASBenchDataset(root=str(temp_dataset_dir))
         assert len(dataset2) == 5
+
+    def test_reprocesses_stale_cached_dataset_that_lacks_positions(
+        self, sample_csv_content: str
+    ) -> None:
+        """Older processed caches without `pos` should be upgraded automatically."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            dataset_root = Path(temp_dir)
+            raw_dir = dataset_root / "raw"
+            processed_dir = dataset_root / "processed"
+            raw_dir.mkdir(parents=True)
+            processed_dir.mkdir(parents=True)
+            (raw_dir / "pfasbench.csv").write_text(sample_csv_content)
+
+            smiles = "C(=O)(C(F)(F)F)O"
+            data = mol_to_pyg_data(Chem.MolFromSmiles(smiles), include_pos=False)
+            data.y = torch.tensor([[-0.5, 0.5, 0.5]], dtype=torch.float32)
+            data.smiles = Chem.MolToSmiles(Chem.MolFromSmiles(smiles), canonical=True)
+            data.name = "TFA"
+            data.inchikey = ""
+            PFASBenchDataset.save([data], processed_dir / "data.pt")
+
+            dataset = PFASBenchDataset(root=str(dataset_root))
+            upgraded = dataset[0]
+
+            assert isinstance(upgraded.pos, torch.Tensor)
+            assert upgraded.pos.shape == (upgraded.num_nodes, 3)
+        finally:
+            shutil.rmtree(temp_dir)
+
+    def test_positions_are_deterministic_across_fresh_reprocessing(
+        self, sample_csv_content: str
+    ) -> None:
+        """Separate fresh dataset builds should derive identical 3D coordinates."""
+        temp_dir_one = tempfile.mkdtemp()
+        temp_dir_two = tempfile.mkdtemp()
+        try:
+            for root in (Path(temp_dir_one), Path(temp_dir_two)):
+                raw_dir = root / "raw"
+                raw_dir.mkdir(parents=True)
+                (raw_dir / "pfasbench.csv").write_text(sample_csv_content)
+
+            dataset_one = PFASBenchDataset(root=temp_dir_one)
+            dataset_two = PFASBenchDataset(root=temp_dir_two)
+
+            assert torch.allclose(dataset_one[0].pos, dataset_two[0].pos)
+        finally:
+            shutil.rmtree(temp_dir_one)
+            shutil.rmtree(temp_dir_two)
 
 
 class TestPFASBenchMissingLabels:

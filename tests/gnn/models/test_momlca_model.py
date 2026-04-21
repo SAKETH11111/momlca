@@ -17,7 +17,7 @@ from torch import nn
 from torch_geometric.data import Batch, Data
 
 from gnn.data.datamodules import PFASBenchDataModule
-from gnn.models import GINBackbone, MoMLCAModel, PaiNNStageBackbone
+from gnn.models import GINBackbone, MoMLCAModel, PaiNNBackbone, PaiNNStageBackbone
 from gnn.models.backbones import BaseBackbone
 from src.train import train
 from tests.helpers.transfer_learning import TinyBackbone
@@ -732,13 +732,33 @@ def test_hydra_instantiates_model_with_pfasbench_config() -> None:
     assert model.backbone.output_dim == 128
 
 
-def test_hydra_instantiates_distinct_painn_stage_backbone() -> None:
-    """The `model=painn` override should select a concrete backbone config."""
+def test_hydra_instantiates_distinct_painn_backbone() -> None:
+    """The `model=painn` override should select the real PaiNN backbone config."""
     with initialize(version_base="1.3", config_path="../../../configs"):
         cfg = compose(
             config_name="config.yaml",
             return_hydra_config=True,
             overrides=["model=painn", "data=pfasbench"],
+        )
+        with open_dict(cfg):
+            cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+
+        model = hydra.utils.instantiate(cfg.model)
+
+    GlobalHydra.instance().clear()
+
+    assert isinstance(model, MoMLCAModel)
+    assert isinstance(model.backbone, PaiNNBackbone)
+    assert model.backbone.output_dim == 128
+
+
+def test_hydra_instantiates_distinct_painn_stage_backbone() -> None:
+    """The legacy `model=painn_stage` override should preserve stage checkpoint compatibility."""
+    with initialize(version_base="1.3", config_path="../../../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=["model=painn_stage", "data=pfasbench"],
         )
         with open_dict(cfg):
             cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))

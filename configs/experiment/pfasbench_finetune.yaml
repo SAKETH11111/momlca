@@ -6,7 +6,7 @@
 
 defaults:
   - override /data: pfasbench
-  - override /model: painn
+  - override /model: painn_stage
   - override /callbacks: default
   - override /trainer: default
 

@@ -354,7 +354,7 @@ def test_train_loads_real_tracked_pretrained_artifact_from_repo_relative_path(
     project_root = Path(__file__).resolve().parents[1]
 
     with open_dict(cfg_train):
-        cfg_train.model = OmegaConf.load(project_root / "configs/model/painn.yaml")
+        cfg_train.model = OmegaConf.load(project_root / "configs/model/painn_stage.yaml")
         cfg_train.data = OmegaConf.load(project_root / "configs/data/pfasbench.yaml")
         cfg_train.paths.output_dir = str(tmp_path)
         cfg_train.paths.log_dir = str(tmp_path)
@@ -407,7 +407,7 @@ def test_train_resume_with_real_pretrained_artifact_keeps_resume_precedence(
     project_root = Path(__file__).resolve().parents[1]
 
     with open_dict(cfg_train):
-        cfg_train.model = OmegaConf.load(project_root / "configs/model/painn.yaml")
+        cfg_train.model = OmegaConf.load(project_root / "configs/model/painn_stage.yaml")
         cfg_train.data = OmegaConf.load(project_root / "configs/data/pfasbench.yaml")
         cfg_train.paths.output_dir = str(tmp_path)
         cfg_train.paths.log_dir = str(tmp_path)

@@ -67,9 +67,7 @@ def test_train_script_uses_canonical_config_and_persists_resolved_hydra_config(
 
     resolved_cfg = yaml.safe_load(hydra_config.read_text())
     assert resolved_cfg["model"]["_target_"] == "gnn.models.MoMLCAModel"
-    assert (
-        resolved_cfg["model"]["backbone"]["_target_"] == "gnn.models.backbones.PaiNNStageBackbone"
-    )
+    assert resolved_cfg["model"]["backbone"]["_target_"] == "gnn.models.backbones.PaiNNBackbone"
     assert resolved_cfg["data"]["_target_"] == "gnn.data.datamodules.PFASBenchDataModule"
     assert resolved_cfg["trainer"]["max_epochs"] == 1
     assert resolved_cfg["train"]["run_test"] is False

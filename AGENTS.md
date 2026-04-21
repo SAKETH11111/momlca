@@ -18,6 +18,13 @@ These notes apply to the entire repository.
 - Do not assume the best approach is the one already in local context; verify whether newer or better-supported options exist first.
 - For architecture or pretrained-model decisions, include a short buy-vs-build check during planning, create-story, dev-story, and code-review work.
 
+## Model Selection
+
+- Use `gpt-5.4` for hard tickets, messy specs, architecture work, repo-wide refactors, “figure it out and ship it” prompts, and mixed professional workflows that combine code with broader reasoning.
+- Use `gpt-5.4-mini` for simple sub-work, repetitive fixes, codebase search, lightweight test writing, and bulk tasks where cost efficiency matters more than top-end judgment.
+- Use `gpt-5.3-codex` for software-engineering-heavy terminal work when the task is mostly coding rather than a broader professional workflow.
+- Prefer `gpt-5.4` or `gpt-5.3-codex` over `gpt-5.4-mini` when correctness risk is materially higher.
+
 ## Story Shipping Workflow
 
 - After a story is done, package it on its own delivery branch, commit the changes, and open a PR before moving on.
@@ -26,4 +33,4 @@ These notes apply to the entire repository.
 - External branch names must be product-focused and must not include internal workflow labels such as `bmad`, `epic`, or `story`.
 - In external delivery artifacts such as commit messages, PR titles, PR bodies, PR comments, and reviewer replies, do not mention internal workflow terms such as BMAD, epic, or story.
 - Keep external delivery language product-focused and implementation-focused only.
-- After opening a PR, request automated review by commenting `@coderabbitai review` and `@greptileai`.
+- After opening a PR, request automated review by commenting `@coderabbitai review`, `@greptileai`, and `@codex review`.

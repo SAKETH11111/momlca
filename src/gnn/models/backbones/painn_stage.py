@@ -9,7 +9,7 @@ from gnn.models.backbones.base import BackboneOutput, BaseBackbone
 from gnn.models.backbones.registry import register_backbone
 
 
-@register_backbone("painn")
+@register_backbone("painn_stage")
 class PaiNNStageBackbone(BaseBackbone):
     """Lightweight graph backbone that reserves a distinct `model=painn` path.
 
