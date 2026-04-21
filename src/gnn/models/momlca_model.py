@@ -13,6 +13,8 @@ from lightning import LightningModule
 from torch import nn
 from torch_geometric.data import Batch
 
+from gnn.models.backbones.base import BackboneOutput, BaseBackbone
+
 DEFAULT_PROPERTY_NAMES: tuple[str, ...] = ("logS", "logP", "pKa")
 
 
@@ -21,15 +23,30 @@ def _supports_weights_only(callable_obj: Callable[..., Any]) -> bool:
     return "weights_only" in inspect.signature(callable_obj).parameters
 
 
-class _MeanPoolBackbone(nn.Module):
+class _MeanPoolBackbone(BaseBackbone):
     """Fallback backbone that mean-pools node features into graph features."""
 
-    def forward(self, batch: Batch) -> dict[str, torch.Tensor]:
+    def __init__(self, output_dim: int = 128) -> None:
+        super().__init__()
+        self._output_dim = output_dim
+        self.node_projection = nn.LazyLinear(output_dim)
+        self.activation = nn.SiLU()
+
+    @property
+    def output_dim(self) -> int:
+        """Return graph-feature dimension used by downstream heads."""
+        return self._output_dim
+
+    def forward(self, batch: Batch) -> BackboneOutput:
+        node_features = self.activation(self.node_projection(batch.x))
         graph_features = []
         for graph_index in range(batch.num_graphs):
             mask = batch.batch == graph_index
-            graph_features.append(batch.x[mask].mean(dim=0))
-        return {"graph_features": torch.stack(graph_features, dim=0)}
+            graph_features.append(node_features[mask].mean(dim=0))
+        return {
+            "node_features": node_features,
+            "graph_features": torch.stack(graph_features, dim=0),
+        }
 
 
 class _LinearPropertyHead(nn.Module):
@@ -48,7 +65,7 @@ class MoMLCAModel(LightningModule):
 
     def __init__(
         self,
-        backbone: nn.Module | None = None,
+        backbone: BaseBackbone | None = None,
         heads: Mapping[str, nn.Module] | nn.ModuleDict | None = None,
         optimizer: Callable[..., torch.optim.Optimizer] | None = None,
         scheduler: Callable[..., Any] | None = None,
@@ -62,7 +79,7 @@ class MoMLCAModel(LightningModule):
         """Initialize the model shell.
 
         Args:
-            backbone: Graph encoder receiving a PyG ``Batch``.
+            backbone: Graph encoder implementing the shared ``BaseBackbone`` interface.
             heads: Prediction heads keyed by name.
             optimizer: Optional Hydra-instantiated optimizer partial.
             scheduler: Optional Hydra-instantiated scheduler partial.
@@ -80,6 +97,11 @@ class MoMLCAModel(LightningModule):
         self.property_names = (
             list(property_names) if property_names is not None else list(DEFAULT_PROPERTY_NAMES)
         )
+        if backbone is not None and not isinstance(backbone, BaseBackbone):
+            raise TypeError(
+                "MoMLCAModel requires `backbone` to implement BaseBackbone; "
+                f"received {type(backbone).__name__}."
+            )
         self.backbone = backbone if backbone is not None else _MeanPoolBackbone()
         self.heads = self._normalize_heads(heads)
         self.optimizer_factory = optimizer
@@ -102,7 +124,7 @@ class MoMLCAModel(LightningModule):
 
     def forward(self, batch: Batch) -> dict[str, Any]:
         """Run the batch through the backbone, then through all configured heads."""
-        backbone_outputs = self.backbone(batch)
+        backbone_outputs = self._ensure_backbone_outputs(self.backbone(batch), batch)
         predictions = {
             head_name: head(self._resolve_head_inputs(head_name, backbone_outputs))
             for head_name, head in self.heads.items()
@@ -115,7 +137,7 @@ class MoMLCAModel(LightningModule):
     def setup(self, stage: str) -> None:
         """Compile the backbone and heads when requested for fit."""
         if self.compile_model and stage == "fit" and not self._is_compiled:
-            self.backbone = cast(nn.Module, torch.compile(self.backbone))
+            self.backbone = cast(BaseBackbone, torch.compile(self.backbone))
             for head_name, head in list(self.heads.items()):
                 self.heads[head_name] = cast(nn.Module, torch.compile(head))
             self._is_compiled = True
@@ -159,7 +181,9 @@ class MoMLCAModel(LightningModule):
 
     def configure_optimizers(self) -> Any:
         """Create the optimizer and optional scheduler for Lightning."""
-        trainable_parameters = [parameter for parameter in self.parameters() if parameter.requires_grad]
+        trainable_parameters = [
+            parameter for parameter in self.parameters() if parameter.requires_grad
+        ]
         optimizer_factory = self.optimizer_factory
         if optimizer_factory is not None:
             optimizer = optimizer_factory(params=trainable_parameters)
@@ -228,6 +252,49 @@ class MoMLCAModel(LightningModule):
                 return backbone_outputs["graph_features"]
         return backbone_outputs
 
+    def _ensure_backbone_outputs(
+        self,
+        backbone_outputs: Any,
+        batch: Batch,
+    ) -> dict[str, Any]:
+        """Validate backbone outputs against the shared node+graph contract."""
+        if isinstance(backbone_outputs, Mapping):
+            normalized_outputs: dict[str, Any] = dict(backbone_outputs)
+            if "node_features" not in normalized_outputs:
+                raise ValueError(
+                    "Backbone outputs must include a tensor-valued 'node_features' entry."
+                )
+            if "graph_features" not in normalized_outputs:
+                raise ValueError(
+                    "Backbone outputs must include a tensor-valued 'graph_features' entry."
+                )
+
+            node_features = normalized_outputs["node_features"]
+            graph_features = normalized_outputs["graph_features"]
+            if not isinstance(node_features, torch.Tensor):
+                raise ValueError(
+                    "Backbone outputs must include a tensor-valued 'node_features' entry."
+                )
+            if not isinstance(graph_features, torch.Tensor):
+                raise ValueError(
+                    "Backbone outputs must include a tensor-valued 'graph_features' entry."
+                )
+
+            if node_features.shape[0] != batch.x.shape[0]:
+                raise ValueError(
+                    "Backbone output 'node_features' must align with the batch node count."
+                )
+            if graph_features.shape[0] != batch.num_graphs:
+                raise ValueError(
+                    "Backbone output 'graph_features' must align with the batch graph count."
+                )
+            return normalized_outputs
+
+        raise ValueError(
+            "Backbone must return a mapping with tensor-valued 'node_features' and "
+            "'graph_features' entries."
+        )
+
     def _normalize_heads(
         self, heads: Mapping[str, nn.Module] | nn.ModuleDict | None
     ) -> nn.ModuleDict:
@@ -268,9 +335,7 @@ class MoMLCAModel(LightningModule):
         if checkpoint_path in (None, ""):
             return
 
-        checkpoint = self._load_checkpoint_payload(
-            self._resolve_checkpoint_path(checkpoint_path)
-        )
+        checkpoint = self._load_checkpoint_payload(self._resolve_checkpoint_path(checkpoint_path))
         checkpoint_state = self._extract_checkpoint_state_dict(checkpoint)
         backbone_state = self._extract_backbone_state_dict(checkpoint_state)
         incompatible_keys = self.backbone.load_state_dict(backbone_state, strict=False)
@@ -309,7 +374,9 @@ class MoMLCAModel(LightningModule):
         return torch.load(checkpoint_path, **load_kwargs)
 
     def _extract_checkpoint_state_dict(self, checkpoint: Any) -> Mapping[str, Any]:
-        checkpoint_format = str(self.pretrained_backbone_config.get("checkpoint_format", "lightning"))
+        checkpoint_format = str(
+            self.pretrained_backbone_config.get("checkpoint_format", "lightning")
+        )
         if checkpoint_format not in {"lightning", "state_dict"}:
             raise ValueError(
                 "pretrained_backbone.checkpoint_format must be either 'lightning' or 'state_dict'"
