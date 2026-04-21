@@ -1,0 +1,20 @@
+task_name: train
+
+tags: ["dev"]
+
+run_train: true
+run_test: true
+
+ckpt_path: null
+seed: null
+optimized_metric: null
+
+multiseed:
+  enabled: null
+  sweep_dir: null
+  job_num: null
+  metrics_filename: multiseed_metrics.json
+  summary_json: multiseed_summary.json
+  summary_csv: multiseed_summary.csv
+  summary_md: multiseed_summary.md
+  wandb_summary_prefix: multiseed

@@ -4,7 +4,11 @@ from src.utils.instantiators import (
 from src.utils.instantiators import (
     instantiate_loggers as instantiate_loggers,
 )
+from src.utils.logging_utils import (
+    apply_wandb_multirun_metadata as apply_wandb_multirun_metadata,
+)
 from src.utils.logging_utils import log_hyperparameters as log_hyperparameters
+from src.utils.multirun import finalize_multiseed_run as finalize_multiseed_run
 from src.utils.pylogger import RankedLogger as RankedLogger
 from src.utils.rich_utils import enforce_tags as enforce_tags
 from src.utils.rich_utils import print_config_tree as print_config_tree

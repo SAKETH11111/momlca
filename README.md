@@ -58,7 +58,8 @@ poetry run dvc pull
 poetry run dvc status
 
 # Push new/updated data (after adding or modifying data files)
-poetry run dvc push
+# Requires an explicitly configured writable remote.
+poetry run dvc push -r <your-writable-remote>
 
 # Add new data file to DVC tracking
 poetry run dvc add data/path/to/file.csv
@@ -74,16 +75,26 @@ git add data/path/to/file.csv.dvc data/path/to/.gitignore
 
 ### Remote Storage
 
-The default remote is configured as a local directory for development. For production/team use, configure a cloud remote:
+The checked-in default remote is a public read-only GitHub mirror so that fresh clones can run `poetry run dvc pull` without machine-local path surgery.
+
+If you need to publish new DVC objects, configure a writable remote locally in `.dvc/config.local` (or with `dvc remote add --local`) and push to that remote explicitly. The checked-in `githubraw` mirror is pull-only and will reject plain `dvc push` writes.
+
+```bash
+# Example: local writable override
+poetry run dvc remote add --local localremote /path/to/local/storage
+poetry run dvc push -r localremote
+```
+
+For production/team use, you can also configure a cloud remote locally:
 
 ```bash
 # Example: Add S3 remote
 pip install dvc-s3
-dvc remote add -d s3remote s3://your-bucket/dvc-storage
+poetry run dvc remote add --local s3remote s3://your-bucket/dvc-storage
 
 # Example: Add GCS remote
 pip install dvc-gs
-dvc remote add -d gcsremote gs://your-bucket/dvc-storage
+poetry run dvc remote add --local gcsremote gs://your-bucket/dvc-storage
 ```
 
 See `.dvc/config.example` for more remote configuration options.

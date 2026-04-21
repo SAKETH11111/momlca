@@ -221,7 +221,7 @@ def predict_xgboost(model: XGBoostBaseline | XGBRegressor, X: np.ndarray) -> np.
 
 
 def predict_xgb(model: XGBoostBaseline | XGBRegressor, X: np.ndarray) -> np.ndarray:
-    """Story-aligned alias for ``predict_xgboost``."""
+    """Backward-compatible alias for ``predict_xgboost``."""
     return predict_xgboost(model, X)
 
 
@@ -234,7 +234,7 @@ def save_xgboost_model(model: XGBoostBaseline | XGBRegressor, path: str | Path) 
 
 
 def save_xgb_model(model: XGBoostBaseline | XGBRegressor, path: str | Path) -> None:
-    """Story-aligned alias for ``save_xgboost_model``."""
+    """Backward-compatible alias for ``save_xgboost_model``."""
     save_xgboost_model(model, path)
 
 
@@ -256,7 +256,7 @@ def load_xgboost_model(path: str | Path) -> XGBoostBaseline | XGBRegressor:
 
 
 def load_xgb_model(path: str | Path) -> XGBoostBaseline | XGBRegressor:
-    """Story-aligned alias for ``load_xgboost_model``."""
+    """Backward-compatible alias for ``load_xgboost_model``."""
     return load_xgboost_model(path)
 
 

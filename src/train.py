@@ -6,7 +6,7 @@ import lightning as L
 import rootutils
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, open_dict
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -28,19 +28,55 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 from src.utils import (
     RankedLogger,
+    apply_wandb_multirun_metadata,
     extras,
+    finalize_multiseed_run,
     get_metric_value,
     instantiate_callbacks,
     instantiate_loggers,
     log_hyperparameters,
     task_wrapper,
 )
+from src.utils.multirun import detect_multirun_context
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
 def _supports_weights_only(callable_obj: object) -> bool:
     return "weights_only" in inspect.signature(callable_obj).parameters
+
+
+def _cfg_value(cfg: DictConfig, runtime_cfg: DictConfig, key: str, runtime_key: str) -> Any:
+    """Prefer top-level compatibility aliases when callers mutate them directly."""
+    value = cfg.get(key)
+    if value is not None:
+        return value
+    return runtime_cfg.get(runtime_key)
+
+
+def _disable_pretrained_backbone_for_resume(
+    cfg: DictConfig, runtime_cfg: DictConfig
+) -> str | None:
+    """Skip transfer-learning init when exact checkpoint resume is requested."""
+    ckpt_path = _cfg_value(cfg, runtime_cfg, "ckpt_path", "ckpt_path")
+    if ckpt_path in (None, ""):
+        return None
+
+    model_cfg = cfg.get("model")
+    if model_cfg is None:
+        return None
+
+    pretrained_backbone_cfg = model_cfg.get("pretrained_backbone")
+    if pretrained_backbone_cfg is None:
+        return None
+
+    checkpoint_path = pretrained_backbone_cfg.get("checkpoint_path")
+    if checkpoint_path in (None, ""):
+        return None
+
+    with open_dict(model_cfg):
+        model_cfg.pretrained_backbone.checkpoint_path = None
+    return str(checkpoint_path)
 
 
 @task_wrapper
@@ -54,9 +90,20 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     :param cfg: A DictConfig configuration composed by Hydra.
     :return: A tuple with metrics and dict with all instantiated objects.
     """
+    runtime_cfg = cfg.train
+    multirun_context = detect_multirun_context(cfg)
+
     # set seed for random number generators in pytorch, numpy and python.random
-    if cfg.get("seed"):
-        L.seed_everything(cfg.seed, workers=True)
+    seed = _cfg_value(cfg, runtime_cfg, "seed", "seed")
+    if seed is not None:
+        L.seed_everything(seed, workers=True)
+
+    skipped_pretrained_checkpoint = _disable_pretrained_backbone_for_resume(cfg, runtime_cfg)
+    if skipped_pretrained_checkpoint is not None:
+        log.info(
+            "Skipping pretrained backbone initialization because ckpt_path resume takes "
+            f"precedence: {skipped_pretrained_checkpoint}"
+        )
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
@@ -66,6 +113,9 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
     log.info("Instantiating callbacks...")
     callbacks: list[Callback] = instantiate_callbacks(cfg.get("callbacks"))
+
+    if multirun_context is not None:
+        apply_wandb_multirun_metadata(cfg, group_name=multirun_context.group_name)
 
     log.info("Instantiating loggers...")
     logger: list[Logger] = instantiate_loggers(cfg.get("logger"))
@@ -86,7 +136,7 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         log.info("Logging hyperparameters!")
         log_hyperparameters(object_dict)
 
-    if cfg.get("train"):
+    if runtime_cfg.get("run_train"):
         log.info("Starting training!")
         fit_kwargs = {}
         if _supports_weights_only(trainer.fit):
@@ -94,13 +144,13 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         trainer.fit(
             model=model,
             datamodule=datamodule,
-            ckpt_path=cfg.get("ckpt_path"),
+            ckpt_path=_cfg_value(cfg, runtime_cfg, "ckpt_path", "ckpt_path"),
             **fit_kwargs,
         )
 
     train_metrics = trainer.callback_metrics
 
-    if cfg.get("test"):
+    if _cfg_value(cfg, runtime_cfg, "test", "run_test"):
         log.info("Starting testing!")
         ckpt_path = trainer.checkpoint_callback.best_model_path
         if ckpt_path == "":
@@ -116,11 +166,18 @@ def train(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
 
     # merge train and test metrics
     metric_dict = {**train_metrics, **test_metrics}
+    finalize_multiseed_run(
+        cfg,
+        trainer,
+        metric_dict,
+        logger,
+        context=multirun_context,
+    )
 
     return metric_dict, object_dict
 
 
-@hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
+@hydra.main(version_base="1.3", config_path="../configs", config_name="config.yaml")
 def main(cfg: DictConfig) -> float | None:
     """Main entry point for training.
 

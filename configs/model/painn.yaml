@@ -1,0 +1,32 @@
+_target_: gnn.models.MoMLCAModel
+
+# Expose a dedicated `model=painn` branch in the Hydra config tree
+# while the full equivariant PaiNN backbone is under development.
+backbone:
+  _target_: gnn.models.backbones.PaiNNStageBackbone
+  hidden_channels: 128
+  use_positions: true
+
+heads: null
+
+optimizer: null
+scheduler: null
+
+learning_rate: 0.001
+weight_decay: 0.01
+
+property_names:
+  - logS
+  - logP
+  - pKa
+
+task_weights: null
+
+pretrained_backbone:
+  checkpoint_path: null
+  checkpoint_format: lightning
+  backbone_key_prefix: backbone.
+  freeze_backbone: false
+
+# compile model for faster training with pytorch 2.0
+compile: false

@@ -1,0 +1,85 @@
+artifact:
+  path: artifacts/pretrained/isdpainn_random_split_painn_stage_backbone.pt
+  format: state_dict
+  checkpoint_format: state_dict
+  backbone_key_prefix: backbone.
+  compatible_backbone_target: gnn.models.backbones.PaiNNStageBackbone
+  generated_at: '2026-04-13'
+  sha256: 73a0b0099a8dec37a9175fec13a505eeaf88e1fa2c1e5ac0e9ba83c904ad21bf
+  file_size_bytes: 14077
+source:
+  type: converted-public-pretrained-checkpoint
+  upstream_model: ISD-PaiNN
+  upstream_repo_url: https://github.com/nmdl-mizo/isdpainn
+  upstream_repo_tag: v1.0.0
+  upstream_repo_tag_commit: a2138f6ecf1a14124fc9c8c6c598bad5f01abd11
+  upstream_snapshot:
+    zenodo_doi: 10.5281/zenodo.10547719
+    zenodo_record_id: 10547719
+    checkpoint_file: model_state_random_split.pt
+    checkpoint_url: https://zenodo.org/api/records/10547719/files/model_state_random_split.pt/content
+    checkpoint_retrieved_at: '2026-04-13T17:25:45Z'
+    checkpoint_md5: 5265a7d187000628c2b71bc26e9bd46f
+    checkpoint_sha256: 9473a3d62485297825e43dab47d9fd6be9956487e212c9143e1663f5538cf3ec
+    config_file: config-defaults_random_split.yaml
+    config_url: https://zenodo.org/api/records/10547719/files/config-defaults_random_split.yaml/content
+    config_retrieved_at: '2026-04-13T17:25:46Z'
+    config_md5: de5c3250ca57531e7a43acdd49687ddf
+    config_sha256: 0cac15db2931da1cdf86fea638a22d7507b160db4a14e8dc6c899542a36f186f
+  training_dataset_name: Simulated carbon K-edge spectra dataset aligned to QM9 molecules
+  training_dataset_reference: https://doi.org/10.1038/s41597-022-01303-8
+  license:
+    weights: CC-BY-4.0
+    code: MIT
+    usage_constraints: Retain attribution for the Zenodo weights and upstream ISD-PaiNN
+      code.
+conversion:
+  schema_version: 1
+  repo_head_commit: a7695d1233678f485bd27869e17e7807605dba43
+  script: scripts/prepare_pretrained_backbone.py
+  script_sha256: 939f48c2a900b4e27e94d3c8f6c70ae40c55edf51275dd56865fbbbb050cfa99
+  constants_module: src/gnn/data/transforms/constants.py
+  constants_module_sha256: 621297ab81c10d8f0127edccd83e175197afa98d2fc0768c727347d62a98417a
+  repo_feature_schema:
+    atom_feature_dim: 22
+    atom_atomic_number_slice:
+    - 0
+    - 10
+    upstream_atomic_numbers:
+    - 1
+    - 6
+    - 7
+    - 8
+    - 9
+    direct_element_columns:
+      6: 0
+      7: 1
+      8: 2
+      9: 3
+    fallback_element_columns:
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    other_element_column: 9
+    target_hidden_channels: 128
+  schema_sha256: f1d2da4dfe28d7b69979ec142f58d7fb184017ed9e6005cfed444c63014e1745
+  algorithm:
+  - Reduce the upstream 512-channel invariant atom embeddings to 128 channels by mean-pooling
+    contiguous groups of four features.
+  - Map repo C/N/O/F one-hot atom columns to the reduced ISD-PaiNN element embeddings
+    for atomic numbers 6/7/8/9.
+  - Map the repo 'other' atom column to the reduced upstream hydrogen embedding.
+  - Initialize repo P/S/Cl/Br/I atom columns with the mean reduced embedding over
+    H/C/N/O/F because the upstream checkpoint does not contain those elements.
+  - Zero-initialize the repo handcrafted scalar atom-feature columns and coordinate/radial
+    columns because the upstream checkpoint has no structurally compatible weights
+    for those inputs.
+notes:
+- The normalized checkpoint is intentionally limited to the current PaiNNStageBackbone
+  placeholder delivered in Story 4.7.
+- This artifact is a deterministic conversion of a public pretrained source and is
+  not derived from PFASBench training.
+- Resume checkpoints supplied through top-level ckpt_path must still take precedence
+  over this artifact.

@@ -4,7 +4,7 @@ The descriptor baselines live in `src/gnn/baselines/` and provide the traditiona
 
 `DescriptorExtractor` is the shared feature pipeline. It uses RDKit's public `Descriptors.descList`, supports curated descriptor subsets (`all`, `2d`, `physicochemical`, `topological`), and can append Morgan, RDKit, or MACCS fingerprints. The preferred API is molecule-first through `extract()` and `extract_batch()`, where a single molecule returns a `dict[str, float]` and batches return a labeled `pandas.DataFrame`.
 
-NaN handling is controlled with the story-aligned `handle_nan` modes:
+NaN handling is controlled with the `handle_nan` modes:
 
 - `drop`: remove any feature columns that contain missing values in the fitted batch
 - `impute_mean`: fill missing values with the column mean
@@ -15,7 +15,7 @@ NaN handling is controlled with the story-aligned `handle_nan` modes:
 
 For PFASBench-wide exports, use `export_pfasbench_descriptors(...)` to create `data/pfasbench/processed/descriptors.parquet`. Writing parquet files requires an installed parquet engine such as `pyarrow` or `fastparquet`.
 
-`train_rf_baseline`, `predict_rf`, `save_rf_model`, and `load_rf_model` expose the sklearn `RandomForestRegressor` workflow directly while preserving feature-name metadata for interpretability. When multi-target labels are sparse, the helper intentionally falls back to the per-property wrapper so partially labeled PFASBench rows are kept instead of discarded. `train_xgb_baseline`, `predict_xgb`, `save_xgb_model`, and `load_xgb_model` provide the story-named XGBoost interface, with native `XGBRegressor` behavior for single-target use and the project wrapper retained for sparse multi-target comparison runs.
+`train_rf_baseline`, `predict_rf`, `save_rf_model`, and `load_rf_model` expose the sklearn `RandomForestRegressor` workflow directly while preserving feature-name metadata for interpretability. When multi-target labels are sparse, the helper intentionally falls back to the per-property wrapper so partially labeled PFASBench rows are kept instead of discarded. `train_xgb_baseline`, `predict_xgb`, `save_xgb_model`, and `load_xgb_model` provide a compact XGBoost interface, with native `XGBRegressor` behavior for single-target use and the project wrapper retained for sparse multi-target comparison runs.
 
 `ModelComparison` collects results across one or more named splits and exports CSV, Markdown, LaTeX, and W&B-friendly summaries. The report includes an overall summary table, per-split MAE rankings, and best-model-per-target sections. The default regression metrics are MAE, RMSE, R², Pearson, and Spearman, computed per property and averaged across properties.
 

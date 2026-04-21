@@ -101,9 +101,9 @@ def scaffold_split(
         train_frac: Fraction of data for training (default 0.8).
         val_frac: Fraction of data for validation (default 0.1).
         test_frac: Fraction of data for testing (default 0.1).
-        train: Alias for train fraction (matches story AC keyword).
-        val: Alias for val fraction (matches story AC keyword).
-        test: Alias for test fraction (matches story AC keyword).
+        train: Alias for train fraction.
+        val: Alias for val fraction.
+        test: Alias for test fraction.
 
     Returns:
         Tuple of (train_indices, val_indices, test_indices) as numpy arrays.
