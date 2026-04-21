@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -74,8 +75,8 @@ def _make_painn_batch() -> Batch:
 
 
 def _rotation_matrix_z(theta_radians: float) -> torch.Tensor:
-    cos_theta = float(torch.cos(torch.tensor(theta_radians, dtype=torch.float32)).item())
-    sin_theta = float(torch.sin(torch.tensor(theta_radians, dtype=torch.float32)).item())
+    cos_theta = math.cos(theta_radians)
+    sin_theta = math.sin(theta_radians)
     return torch.tensor(
         [
             [cos_theta, -sin_theta, 0.0],
@@ -177,8 +178,8 @@ def test_registry_module_resolves_builtin_backbones_without_package_import_side_
     }
 
 
-def test_painn_backbone_returns_standardized_output_with_equivariant_node_features() -> None:
-    """PaiNN backbone should expose vector node features and invariant graph features."""
+def test_painn_backbone_returns_standardized_output_with_scalar_node_features() -> None:
+    """PaiNN backbone should expose scalar node and graph features under the shared contract."""
     torch.manual_seed(7)
     batch = _make_painn_batch()
     backbone = PaiNNBackbone(hidden_channels=16, num_layers=2, num_rbf=8, cutoff=6.0)
@@ -186,7 +187,7 @@ def test_painn_backbone_returns_standardized_output_with_equivariant_node_featur
     outputs = backbone(batch)
 
     assert set(outputs) == {"node_features", "graph_features"}
-    assert outputs["node_features"].shape == (batch.x.shape[0], 3, 16)
+    assert outputs["node_features"].shape == (batch.x.shape[0], 16)
     assert outputs["graph_features"].shape == (batch.num_graphs, 16)
     assert backbone.output_dim == 16
 
@@ -216,8 +217,8 @@ def test_painn_backbone_is_translation_invariant_for_outputs() -> None:
     assert torch.allclose(reference["graph_features"], translated["graph_features"], atol=1e-5)
 
 
-def test_painn_backbone_vector_features_are_rotation_equivariant() -> None:
-    """PaiNN vector outputs should rotate with coordinates while graph features remain invariant."""
+def test_painn_backbone_exported_features_are_rotation_invariant() -> None:
+    """Exported PaiNN features should stay invariant under global rotations."""
     torch.manual_seed(13)
     batch = _make_painn_batch()
     rotation = _rotation_matrix_z(theta_radians=torch.pi / 2)
@@ -227,10 +228,22 @@ def test_painn_backbone_vector_features_are_rotation_equivariant() -> None:
 
     reference = backbone(batch)
     rotated = backbone(rotated_batch)
-    expected_rotated_vectors = torch.einsum("ab,nbh->nah", rotation, reference["node_features"])
 
-    assert torch.allclose(rotated["node_features"], expected_rotated_vectors, atol=1e-4)
+    assert torch.allclose(reference["node_features"], rotated["node_features"], atol=1e-4)
     assert torch.allclose(reference["graph_features"], rotated["graph_features"], atol=1e-4)
+
+
+def test_painn_backbone_rejects_trainable_bessel_radial_basis() -> None:
+    """Bessel radial bases should fail fast instead of silently ignoring trainability."""
+    with pytest.raises(ValueError, match="rbf_trainable"):
+        PaiNNBackbone(
+            hidden_channels=16,
+            num_layers=2,
+            num_rbf=8,
+            cutoff=6.0,
+            radial_basis="bessel",
+            rbf_trainable=True,
+        )
 
 
 def test_backbone_interface_annotations_are_explicit_for_static_analysis() -> None:
