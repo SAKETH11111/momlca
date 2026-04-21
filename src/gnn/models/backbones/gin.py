@@ -29,6 +29,7 @@ class GINBackbone(BaseBackbone):
 
     def __init__(
         self,
+        input_dim: int = 22,
         hidden_channels: int = 128,
         num_layers: int = 4,
         dropout: float = 0.0,
@@ -36,20 +37,23 @@ class GINBackbone(BaseBackbone):
         pooling: str = "sum",
     ) -> None:
         super().__init__()
+        if input_dim <= 0:
+            raise ValueError("input_dim must be a positive integer.")
         if hidden_channels <= 0:
             raise ValueError("hidden_channels must be a positive integer.")
         if num_layers <= 0:
             raise ValueError("num_layers must be a positive integer.")
-        if not 0.0 <= dropout <= 1.0:
-            raise ValueError("dropout must be between 0.0 and 1.0.")
+        if not 0.0 <= dropout < 1.0:
+            raise ValueError("dropout must be in the range [0.0, 1.0).")
 
+        self.input_dim = input_dim
         self.hidden_channels = hidden_channels
         self.num_layers = num_layers
         self.dropout = dropout
         self.train_eps = train_eps
         self.pooling = pooling.strip().lower()
-        self._pool = _resolve_pooling(pooling)
-        self.input_projection = nn.LazyLinear(hidden_channels)
+        self._pool = _resolve_pooling(self.pooling)
+        self.input_projection = nn.Linear(input_dim, hidden_channels)
         self.convs = nn.ModuleList(
             [
                 GINConv(

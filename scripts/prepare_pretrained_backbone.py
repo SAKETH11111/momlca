@@ -8,7 +8,7 @@ import json
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -180,7 +180,7 @@ def compute_schema_sha256(schema_inputs: dict[str, object]) -> str:
 def format_file_timestamp(path: Path) -> str:
     """Return a stable UTC timestamp for when ``path`` was last materialized locally."""
     return (
-        datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z")
@@ -274,7 +274,7 @@ def build_metadata(
             "checkpoint_format": "state_dict",
             "backbone_key_prefix": "backbone.",
             "compatible_backbone_target": "gnn.models.backbones.PaiNNStageBackbone",
-            "generated_at": datetime.now(UTC).date().isoformat(),
+            "generated_at": datetime.now(timezone.utc).date().isoformat(),
             "sha256": prepared.sha256,
             "file_size_bytes": prepared.size_bytes,
         },

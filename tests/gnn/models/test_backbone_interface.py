@@ -66,7 +66,7 @@ def test_painn_stage_backbone_returns_standardized_backbone_output() -> None:
 def test_gin_backbone_returns_standardized_backbone_output(pooling: str) -> None:
     """GIN backbone should return node+graph features under the shared schema."""
     batch = _make_batch()
-    backbone = GINBackbone(hidden_channels=32, num_layers=2, pooling=pooling)
+    backbone = GINBackbone(input_dim=2, hidden_channels=32, num_layers=2, pooling=pooling)
 
     outputs = backbone(batch)
 
@@ -77,15 +77,15 @@ def test_gin_backbone_returns_standardized_backbone_output(pooling: str) -> None
 
 
 def test_gin_backbone_output_dim_is_explicit_before_first_forward() -> None:
-    """GIN output_dim should be stable prior to lazy-layer initialization."""
-    backbone = GINBackbone(hidden_channels=48, num_layers=3)
+    """GIN output_dim should be stable prior to the first forward pass."""
+    backbone = GINBackbone(input_dim=2, hidden_channels=48, num_layers=3)
     assert backbone.output_dim == 48
 
 
 def test_gin_backbone_rejects_unknown_pooling_mode() -> None:
     """GIN should fail fast for unsupported global pooling selections."""
     with pytest.raises(ValueError, match="pooling"):
-        GINBackbone(pooling="max")
+        GINBackbone(input_dim=2, pooling="max")
 
 
 def test_builtin_backbones_are_registered_for_lookup_by_name() -> None:

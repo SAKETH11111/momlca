@@ -45,7 +45,7 @@ jobs:
       - name: Install dependencies
         run: poetry install
       - name: Type check with mypy
-        run: poetry run mypy src/
+        run: poetry run mypy
 
   test:
     runs-on: ubuntu-latest

@@ -67,18 +67,20 @@ def test_canonical_train_entrypoint_supports_gnn_overrides() -> None:
 
 def test_canonical_train_entrypoint_supports_gin_override() -> None:
     """The canonical train entrypoint should compose the new GIN model preset."""
-    with initialize(version_base="1.3", config_path="../configs"):
-        cfg = compose(
-            config_name="config.yaml",
-            return_hydra_config=True,
-            overrides=["model=gin", "data=pfasbench"],
-        )
-        cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
-
-    GlobalHydra.instance().clear()
+    try:
+        with initialize(version_base="1.3", config_path="../configs"):
+            cfg = compose(
+                config_name="config.yaml",
+                return_hydra_config=True,
+                overrides=["model=gin", "data=pfasbench"],
+            )
+            cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+    finally:
+        GlobalHydra.instance().clear()
 
     assert cfg.model._target_ == "gnn.models.MoMLCAModel"
     assert cfg.model.backbone._target_ == "gnn.models.backbones.GINBackbone"
+    assert cfg.model.backbone.input_dim == 22
     assert cfg.model.backbone.hidden_channels == 128
     assert cfg.model.backbone.num_layers == 4
     assert cfg.data._target_ == "gnn.data.datamodules.PFASBenchDataModule"

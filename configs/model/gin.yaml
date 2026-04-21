@@ -2,6 +2,7 @@ _target_: gnn.models.MoMLCAModel
 
 backbone:
   _target_: gnn.models.backbones.GINBackbone
+  input_dim: 22
   hidden_channels: 128
   num_layers: 4
   dropout: 0.0
