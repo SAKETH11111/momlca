@@ -72,5 +72,7 @@ jobs:
           virtualenvs-in-project: true
       - name: Install dependencies
         run: poetry install
+      - name: Materialize DVC-tracked artifacts
+        run: poetry run dvc pull
       - name: Run tests
         run: poetry run pytest -v --cov=src -k "not ddp"

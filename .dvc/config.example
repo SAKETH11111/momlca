@@ -3,8 +3,19 @@
 # Copy this to config.local for your own remote settings
 # (config.local is gitignored and overrides config)
 
-# Local Storage (default for development)
-# ----------------------------------------
+# Public GitHub Raw mirror (default checked-in pull remote)
+# ---------------------------------------------------------
+# [core]
+#     remote = githubraw
+# ['remote "githubraw"']
+#     url = https://raw.githubusercontent.com/<owner>/<repo>/dvc-storage/.dvc/cache
+#
+# The checked-in default remote is intended for portable read-only pulls.
+# Configure your own writable remote locally in `.dvc/config.local` when you
+# need to publish new cache objects.
+
+# Local Storage (example writable override)
+# -----------------------------------------
 # [core]
 #     remote = localremote
 # ['remote "localremote"']
@@ -43,5 +54,7 @@
 #     url = ssh://user@host/path/to/storage
 
 # Notes:
+# - The repo's default checked-in remote should remain a portable read-only pull mirror.
+# - Put writable remote overrides in `.dvc/config.local` so teammates are not forced onto a machine-local path.
 # - Use `dvc remote modify <remote> --local credentialpath <path>` for sensitive settings
 # - Cloud remotes require additional DVC packages: pip install dvc-s3, dvc-gs, dvc-azure

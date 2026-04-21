@@ -13,6 +13,10 @@ import torch
 import yaml
 
 from tests.helpers.pfasbench import write_sample_pfasbench_dataset
+from tests.helpers.pretrained_artifacts import (
+    TRACKED_PAINN_STAGE_ARTIFACT_RELATIVE_PATH,
+    require_tracked_painn_stage_artifact,
+)
 
 
 def test_train_script_uses_canonical_config_and_persists_resolved_hydra_config(
@@ -158,10 +162,7 @@ def test_train_script_accepts_finetune_config_without_overloading_resume_ckpt(
     assert resolved_cfg["ckpt_path"] == "${train.ckpt_path}"
     assert resolved_cfg["train"]["ckpt_path"] is None
     assert resolved_cfg["model"]["learning_rate"] == 0.0001
-    assert (
-        resolved_cfg["model"]["pretrained_backbone"]["checkpoint_path"]
-        == str(pretrained_path)
-    )
+    assert resolved_cfg["model"]["pretrained_backbone"]["checkpoint_path"] == str(pretrained_path)
     assert resolved_cfg["model"]["pretrained_backbone"]["freeze_backbone"] is True
 
     checkpoint_dir = run_dir / "checkpoints"
@@ -191,8 +192,8 @@ def test_train_script_resolves_relative_pretrained_checkpoint_paths(
     pretrained_path = pretrained_dir / "pretrained-backbone.pt"
     torch.save(
         {
-            "backbone.linear.weight": torch.full((4, 22), 2.25),
-            "backbone.linear.bias": torch.full((4,), 0.5),
+            "backbone.node_projection.weight": torch.full((128, 22), 2.25),
+            "backbone.node_projection.bias": torch.full((128,), 0.5),
         },
         pretrained_path,
     )
@@ -218,9 +219,6 @@ def test_train_script_resolves_relative_pretrained_checkpoint_paths(
             "data.train_frac=0.5",
             "data.val_frac=0.25",
             "data.test_frac=0.25",
-            "+model.backbone._target_=tests.helpers.transfer_learning.TinyBackbone",
-            "+model.backbone.input_dim=22",
-            "+model.backbone.hidden_dim=4",
             "model.pretrained_backbone.checkpoint_path=" + relative_pretrained_path.as_posix(),
             "model.pretrained_backbone.checkpoint_format=state_dict",
             "model.pretrained_backbone.freeze_backbone=true",
@@ -242,6 +240,7 @@ def test_train_script_resolves_relative_pretrained_checkpoint_paths(
         resolved_cfg["model"]["pretrained_backbone"]["checkpoint_path"]
         == relative_pretrained_path.as_posix()
     )
+    assert resolved_cfg["model"]["backbone"]["use_positions"] is False
 
     last_checkpoint = torch.load(
         run_dir / "checkpoints" / "last.ckpt",
@@ -249,12 +248,87 @@ def test_train_script_resolves_relative_pretrained_checkpoint_paths(
         weights_only=False,
     )
     assert torch.equal(
-        last_checkpoint["state_dict"]["backbone.linear.weight"],
-        torch.full((4, 22), 2.25),
+        last_checkpoint["state_dict"]["backbone.node_projection.weight"],
+        torch.full((128, 22), 2.25),
     )
     assert torch.equal(
-        last_checkpoint["state_dict"]["backbone.linear.bias"],
-        torch.full((4,), 0.5),
+        last_checkpoint["state_dict"]["backbone.node_projection.bias"],
+        torch.full((128,), 0.5),
+    )
+
+
+@pytest.mark.parametrize(
+    ("experiment_name", "run_dir_name"),
+    [
+        ("pfasbench_finetune", "tracked-finetune-run"),
+        ("pfasbench_finetune_momlca", "tracked-finetune-momlca-run"),
+    ],
+)
+def test_train_script_uses_tracked_real_pretrained_artifact_from_finetune_preset(
+    tmp_path: Path,
+    experiment_name: str,
+    run_dir_name: str,
+) -> None:
+    """Both fine-tune presets should load the tracked DVC artifact from a Hydra run dir."""
+    artifact_path = require_tracked_painn_stage_artifact()
+    artifact_state = torch.load(artifact_path, map_location="cpu", weights_only=True)
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+    run_dir = tmp_path / run_dir_name
+    project_root = Path(__file__).resolve().parents[2]
+    script_path = project_root / "scripts" / "train.py"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            f"experiment={experiment_name}",
+            "train.run_test=false",
+            "trainer.accelerator=cpu",
+            "trainer.devices=1",
+            "trainer.max_epochs=1",
+            "+trainer.limit_train_batches=1",
+            "+trainer.limit_val_batches=1",
+            "+trainer.num_sanity_val_steps=0",
+            "data.batch_size=2",
+            "data.num_workers=0",
+            "data.root=" + str(dataset_root),
+            "data.split=random",
+            "data.train_frac=0.5",
+            "data.val_frac=0.25",
+            "data.test_frac=0.25",
+            "model.pretrained_backbone.freeze_backbone=true",
+            "extras.print_config=false",
+            "extras.enforce_tags=false",
+            "hydra.run.dir=" + str(run_dir),
+        ],
+        check=True,
+        cwd=project_root,
+    )
+
+    hydra_config = run_dir / ".hydra" / "config.yaml"
+    assert hydra_config.exists()
+
+    resolved_cfg = yaml.safe_load(hydra_config.read_text())
+    assert (
+        resolved_cfg["model"]["pretrained_backbone"]["checkpoint_path"]
+        == TRACKED_PAINN_STAGE_ARTIFACT_RELATIVE_PATH
+    )
+    assert resolved_cfg["model"]["pretrained_backbone"]["checkpoint_format"] == "state_dict"
+    assert resolved_cfg["model"]["backbone"]["use_positions"] is False
+    assert resolved_cfg["model"]["pretrained_backbone"]["freeze_backbone"] is True
+
+    last_checkpoint = torch.load(
+        run_dir / "checkpoints" / "last.ckpt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert torch.equal(
+        last_checkpoint["state_dict"]["backbone.node_projection.weight"],
+        artifact_state["backbone.node_projection.weight"],
+    )
+    assert torch.equal(
+        last_checkpoint["state_dict"]["backbone.node_projection.bias"],
+        artifact_state["backbone.node_projection.bias"],
     )
 
 

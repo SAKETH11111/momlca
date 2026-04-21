@@ -1,4 +1,4 @@
 [core]
-    remote = localremote
-['remote "localremote"']
-    url = /Users/saketh/Developer/.dvc-storage
+    remote = githubraw
+['remote "githubraw"']
+    url = https://raw.githubusercontent.com/SAKETH11111/momlca/dvc-storage/.dvc/cache

@@ -1,10 +1,15 @@
+from pathlib import Path
+
 import hydra
 import pytest
 import rootutils
+import yaml
 from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
+
+from tests.helpers.pretrained_artifacts import TRACKED_PAINN_STAGE_ARTIFACT_RELATIVE_PATH
 
 
 def test_train_config(cfg_train: DictConfig) -> None:
@@ -80,7 +85,7 @@ def test_multiseed_train_preset_composes_with_canonical_entrypoint() -> None:
     ("experiment_name", "expected_backbone_target"),
     [
         ("pfasbench_finetune", "gnn.models.backbones.PaiNNStageBackbone"),
-        ("pfasbench_finetune_momlca", None),
+        ("pfasbench_finetune_momlca", "gnn.models.backbones.PaiNNStageBackbone"),
     ],
 )
 def test_finetune_experiments_compose_with_lower_lr_and_pretrained_backbone(
@@ -91,23 +96,44 @@ def test_finetune_experiments_compose_with_lower_lr_and_pretrained_backbone(
         cfg = compose(
             config_name="config.yaml",
             return_hydra_config=True,
-            overrides=[
-                f"experiment={experiment_name}",
-                "model.pretrained_backbone.checkpoint_path=/tmp/pretrained.ckpt",
-            ],
+            overrides=[f"experiment={experiment_name}"],
         )
 
     GlobalHydra.instance().clear()
 
     assert cfg.model._target_ == "gnn.models.MoMLCAModel"
     assert cfg.model.learning_rate == 0.0001
-    assert cfg.model.pretrained_backbone.checkpoint_path == "/tmp/pretrained.ckpt"
-    assert cfg.model.pretrained_backbone.checkpoint_format == "lightning"
+    assert (
+        cfg.model.pretrained_backbone.checkpoint_path == TRACKED_PAINN_STAGE_ARTIFACT_RELATIVE_PATH
+    )
+    assert cfg.model.pretrained_backbone.checkpoint_format == "state_dict"
+    assert cfg.model.pretrained_backbone.backbone_key_prefix == "backbone."
     assert cfg.ckpt_path is None
-    if expected_backbone_target is None:
-        assert cfg.model.backbone is None
-    else:
-        assert cfg.model.backbone._target_ == expected_backbone_target
+    assert cfg.model.backbone._target_ == expected_backbone_target
+    assert cfg.model.backbone.use_positions is False
+
+
+def test_tracked_pretrained_artifact_metadata_pins_repo_conversion_schema() -> None:
+    """Tracked artifact metadata should pin the repo-side conversion schema exactly."""
+    metadata_path = (
+        Path(__file__).resolve().parents[1]
+        / "artifacts/pretrained/isdpainn_random_split_painn_stage_backbone.metadata.yaml"
+    )
+
+    metadata = yaml.safe_load(metadata_path.read_text())
+    conversion = metadata["conversion"]
+
+    assert conversion["schema_version"] == 1
+    assert conversion["repo_head_commit"]
+    assert conversion["script_sha256"]
+    assert conversion["constants_module"] == "src/gnn/data/transforms/constants.py"
+    assert conversion["constants_module_sha256"]
+    assert conversion["schema_sha256"]
+    assert conversion["repo_feature_schema"]["atom_feature_dim"] == 22
+    assert conversion["repo_feature_schema"]["atom_atomic_number_slice"] == [0, 10]
+    assert conversion["repo_feature_schema"]["target_hidden_channels"] == 128
+    assert metadata["source"]["upstream_snapshot"]["checkpoint_retrieved_at"]
+    assert metadata["source"]["upstream_snapshot"]["config_retrieved_at"]
 
 
 def test_canonical_train_entrypoint_defaults_to_project_training_stack() -> None:

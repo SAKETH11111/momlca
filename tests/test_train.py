@@ -8,6 +8,10 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 
 from src.train import train
 from tests.helpers.pfasbench import write_sample_pfasbench_dataset
+from tests.helpers.pretrained_artifacts import (
+    TRACKED_PAINN_STAGE_ARTIFACT_RELATIVE_PATH,
+    require_tracked_painn_stage_artifact,
+)
 from tests.helpers.resume_probe import ResumeProbeCallback
 from tests.helpers.run_if import RunIf
 
@@ -323,6 +327,129 @@ def test_train_resume_does_not_require_original_pretrained_checkpoint(
     first_global_step = object_dict_1["trainer"].global_step
 
     pretrained_path.unlink()
+
+    with open_dict(cfg_train):
+        cfg_train.ckpt_path = str(checkpoint_dir / "last.ckpt")
+        cfg_train.trainer.max_epochs = 2
+
+    _, object_dict_2 = train(cfg_train)
+
+    second_probe = next(
+        callback
+        for callback in object_dict_2["callbacks"]
+        if isinstance(callback, ResumeProbeCallback)
+    )
+    assert second_probe.train_start_epoch == 1
+    assert second_probe.train_start_global_step == first_global_step
+    assert object_dict_2["model"]._pretrained_backbone_loaded is False
+
+
+def test_train_loads_real_tracked_pretrained_artifact_from_repo_relative_path(
+    tmp_path: Path, cfg_train: DictConfig
+) -> None:
+    """Canonical train() should load the tracked pretrained artifact via repo-relative config."""
+    artifact_path = require_tracked_painn_stage_artifact()
+    artifact_state = torch.load(artifact_path, map_location="cpu", weights_only=True)
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+    project_root = Path(__file__).resolve().parents[1]
+
+    with open_dict(cfg_train):
+        cfg_train.model = OmegaConf.load(project_root / "configs/model/painn.yaml")
+        cfg_train.data = OmegaConf.load(project_root / "configs/data/pfasbench.yaml")
+        cfg_train.paths.output_dir = str(tmp_path)
+        cfg_train.paths.log_dir = str(tmp_path)
+        cfg_train.trainer.max_epochs = 1
+        cfg_train.trainer.limit_train_batches = 1
+        cfg_train.trainer.limit_val_batches = 1
+        cfg_train.trainer.num_sanity_val_steps = 0
+        cfg_train.trainer.accelerator = "cpu"
+        cfg_train.trainer.devices = 1
+        cfg_train.data.root = str(dataset_root)
+        cfg_train.data.batch_size = 2
+        cfg_train.data.num_workers = 0
+        cfg_train.data.split = "random"
+        cfg_train.data.train_frac = 0.5
+        cfg_train.data.val_frac = 0.25
+        cfg_train.data.test_frac = 0.25
+        cfg_train.train.run_test = False
+        cfg_train.test = False
+        cfg_train.ckpt_path = None
+        cfg_train.model.pretrained_backbone.checkpoint_path = (
+            TRACKED_PAINN_STAGE_ARTIFACT_RELATIVE_PATH
+        )
+        cfg_train.model.backbone.use_positions = False
+        cfg_train.model.pretrained_backbone.checkpoint_format = "state_dict"
+        cfg_train.model.pretrained_backbone.backbone_key_prefix = "backbone."
+        cfg_train.model.pretrained_backbone.freeze_backbone = True
+
+    HydraConfig().set_config(cfg_train)
+    _, object_dict = train(cfg_train)
+
+    model = object_dict["model"]
+    assert model._pretrained_backbone_loaded is True
+    assert torch.equal(
+        model.backbone.node_projection.weight,  # type: ignore[union-attr]
+        artifact_state["backbone.node_projection.weight"],
+    )
+    assert torch.equal(
+        model.backbone.node_projection.bias,  # type: ignore[union-attr]
+        artifact_state["backbone.node_projection.bias"],
+    )
+    assert all(not parameter.requires_grad for parameter in model.backbone.parameters())
+
+
+def test_train_resume_with_real_pretrained_artifact_keeps_resume_precedence(
+    tmp_path: Path, cfg_train: DictConfig
+) -> None:
+    """Exact resume should still disable transfer init when the tracked artifact is configured."""
+    require_tracked_painn_stage_artifact()
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+    project_root = Path(__file__).resolve().parents[1]
+
+    with open_dict(cfg_train):
+        cfg_train.model = OmegaConf.load(project_root / "configs/model/painn.yaml")
+        cfg_train.data = OmegaConf.load(project_root / "configs/data/pfasbench.yaml")
+        cfg_train.paths.output_dir = str(tmp_path)
+        cfg_train.paths.log_dir = str(tmp_path)
+        cfg_train.trainer.max_epochs = 1
+        cfg_train.trainer.limit_train_batches = 1
+        cfg_train.trainer.limit_val_batches = 1
+        cfg_train.trainer.num_sanity_val_steps = 0
+        cfg_train.trainer.accelerator = "cpu"
+        cfg_train.trainer.devices = 1
+        cfg_train.data.root = str(dataset_root)
+        cfg_train.data.batch_size = 2
+        cfg_train.data.num_workers = 0
+        cfg_train.data.split = "random"
+        cfg_train.data.train_frac = 0.5
+        cfg_train.data.val_frac = 0.25
+        cfg_train.data.test_frac = 0.25
+        cfg_train.train.run_test = False
+        cfg_train.test = False
+        cfg_train.ckpt_path = None
+        cfg_train.callbacks.resume_probe = {
+            "_target_": "tests.helpers.resume_probe.ResumeProbeCallback"
+        }
+        cfg_train.model.pretrained_backbone.checkpoint_path = (
+            TRACKED_PAINN_STAGE_ARTIFACT_RELATIVE_PATH
+        )
+        cfg_train.model.backbone.use_positions = False
+        cfg_train.model.pretrained_backbone.checkpoint_format = "state_dict"
+        cfg_train.model.pretrained_backbone.backbone_key_prefix = "backbone."
+        cfg_train.model.pretrained_backbone.freeze_backbone = False
+
+    HydraConfig().set_config(cfg_train)
+    _, object_dict_1 = train(cfg_train)
+
+    checkpoint_dir = tmp_path / "checkpoints"
+    first_probe = next(
+        callback
+        for callback in object_dict_1["callbacks"]
+        if isinstance(callback, ResumeProbeCallback)
+    )
+    assert first_probe.train_start_epoch == 0
+    assert object_dict_1["model"]._pretrained_backbone_loaded is True
+    first_global_step = object_dict_1["trainer"].global_step
 
     with open_dict(cfg_train):
         cfg_train.ckpt_path = str(checkpoint_dir / "last.ckpt")

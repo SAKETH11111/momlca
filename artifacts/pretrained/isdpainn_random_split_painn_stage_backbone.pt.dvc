@@ -1,0 +1,5 @@
+outs:
+- md5: 4bf6574f87608742ab81dfcef6162e8b
+  size: 14077
+  hash: md5
+  path: isdpainn_random_split_painn_stage_backbone.pt

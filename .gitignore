@@ -158,3 +158,6 @@ configs/local/default.yaml
 
 # Aim logging
 .aim
+
+# Local scratch outputs from one-off validation/regeneration workflows
+.tmp/
