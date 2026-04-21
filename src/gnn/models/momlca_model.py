@@ -288,6 +288,12 @@ class MoMLCAModel(LightningModule):
                 raise ValueError(
                     "Backbone output 'graph_features' must align with the batch graph count."
                 )
+            if graph_features.shape[-1] != self.backbone.output_dim:
+                raise ValueError(
+                    "Backbone output 'graph_features' last dimension "
+                    f"({graph_features.shape[-1]}) does not match "
+                    f"backbone.output_dim ({self.backbone.output_dim})."
+                )
             return normalized_outputs
 
         raise ValueError(
@@ -370,6 +376,8 @@ class MoMLCAModel(LightningModule):
         if checkpoint_format == "state_dict" and _supports_weights_only(torch.load):
             load_kwargs["weights_only"] = True
         elif checkpoint_format == "lightning" and _supports_weights_only(torch.load):
+            # Lightning checkpoints may include non-tensor Python objects and must
+            # only be loaded from trusted sources.
             load_kwargs["weights_only"] = False
         return torch.load(checkpoint_path, **load_kwargs)
 

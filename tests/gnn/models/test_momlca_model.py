@@ -164,6 +164,24 @@ class _TensorOnlyBackbone(BaseBackbone):
         return torch.stack(graph_features, dim=0)  # type: ignore[return-value]
 
 
+class _MismatchedOutputDimBackbone(BaseBackbone):
+    """Backbone with mismatched output_dim for graph features."""
+
+    @property
+    def output_dim(self) -> int:
+        return 3
+
+    def forward(self, batch: Batch) -> dict[str, torch.Tensor]:
+        graph_features = []
+        for graph_index in range(batch.num_graphs):
+            mask = batch.batch == graph_index
+            graph_features.append(batch.x[mask].mean(dim=0))
+        return {
+            "node_features": batch.x,
+            "graph_features": torch.stack(graph_features, dim=0),
+        }
+
+
 def save_lightning_checkpoint(path: Path, state_dict: dict[str, torch.Tensor]) -> Path:
     """Persist a minimal Lightning-style checkpoint for transfer-loading tests."""
     torch.save({"state_dict": state_dict, "epoch": 0, "global_step": 0}, path)
@@ -306,6 +324,18 @@ def test_model_rejects_backbone_outputs_that_are_not_mappings() -> None:
     )
 
     with pytest.raises(ValueError, match="Backbone must return a mapping"):
+        model.forward(batch)
+
+
+def test_model_rejects_graph_feature_width_mismatch_with_output_dim() -> None:
+    """Backbones must keep graph feature width aligned with output_dim."""
+    batch = make_batch()
+    model = MoMLCAModel(
+        backbone=_MismatchedOutputDimBackbone(),
+        heads={"property": RecordingHead()},
+    )
+
+    with pytest.raises(ValueError, match="backbone.output_dim"):
         model.forward(batch)
 
 
