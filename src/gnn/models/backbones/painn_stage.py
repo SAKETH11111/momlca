@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import torch
-from torch import nn
 from torch_geometric.data import Batch
 
+from gnn.models.backbones.base import BackboneOutput, BaseBackbone
 
-class PaiNNStageBackbone(nn.Module):
+
+class PaiNNStageBackbone(BaseBackbone):
     """Lightweight graph backbone that reserves a distinct `model=painn` path.
 
     This is intentionally a small shell so the Hydra config tree can expose a
@@ -19,10 +20,15 @@ class PaiNNStageBackbone(nn.Module):
         super().__init__()
         self.hidden_channels = hidden_channels
         self.use_positions = use_positions
-        self.node_projection = nn.LazyLinear(hidden_channels)
-        self.activation = nn.SiLU()
+        self.node_projection = torch.nn.LazyLinear(hidden_channels)
+        self.activation = torch.nn.SiLU()
 
-    def forward(self, batch: Batch) -> dict[str, torch.Tensor]:
+    @property
+    def output_dim(self) -> int:
+        """Return graph-feature dimension used by downstream heads."""
+        return self.hidden_channels
+
+    def forward(self, batch: Batch) -> BackboneOutput:
         """Project atom features into a trainable graph embedding space."""
         node_features = batch.x
         if self.use_positions and getattr(batch, "pos", None) is not None:

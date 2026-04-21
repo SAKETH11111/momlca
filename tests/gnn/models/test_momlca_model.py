@@ -18,6 +18,7 @@ from torch_geometric.data import Batch, Data
 
 from gnn.data.datamodules import PFASBenchDataModule
 from gnn.models import MoMLCAModel, PaiNNStageBackbone
+from gnn.models.backbones import BaseBackbone
 from src.train import train
 from tests.helpers.transfer_learning import TinyBackbone
 
@@ -60,12 +61,16 @@ def write_sample_pfasbench_dataset(root: Path) -> Path:
     return root
 
 
-class RecordingBackbone(nn.Module):
+class RecordingBackbone(BaseBackbone):
     """Backbone test double that aggregates node features per graph."""
 
     def __init__(self) -> None:
         super().__init__()
         self.last_batch: Batch | None = None
+
+    @property
+    def output_dim(self) -> int:
+        return 2
 
     def forward(self, batch: Batch) -> dict[str, torch.Tensor]:
         self.last_batch = batch
@@ -74,6 +79,7 @@ class RecordingBackbone(nn.Module):
             mask = batch.batch == graph_index
             graph_features.append(batch.x[mask].mean(dim=0))
         return {
+            "node_features": batch.x,
             "graph_features": torch.stack(graph_features, dim=0),
         }
 
@@ -112,6 +118,50 @@ class StaticHead(nn.Module):
 
     def forward(self, _: torch.Tensor) -> torch.Tensor:
         return self.predictions + (self.anchor * 0.0)
+
+
+class _PlainModuleBackbone(nn.Module):
+    """Invalid backbone that does not implement the shared BaseBackbone contract."""
+
+    def forward(self, batch: Batch) -> dict[str, torch.Tensor]:
+        graph_features = []
+        for graph_index in range(batch.num_graphs):
+            mask = batch.batch == graph_index
+            graph_features.append(batch.x[mask].mean(dim=0))
+        return {
+            "node_features": batch.x,
+            "graph_features": torch.stack(graph_features, dim=0),
+        }
+
+
+class _MissingNodeFeaturesBackbone(BaseBackbone):
+    """Backbone that omits node features to exercise output-contract validation."""
+
+    @property
+    def output_dim(self) -> int:
+        return 2
+
+    def forward(self, batch: Batch) -> dict[str, torch.Tensor]:
+        graph_features = []
+        for graph_index in range(batch.num_graphs):
+            mask = batch.batch == graph_index
+            graph_features.append(batch.x[mask].mean(dim=0))
+        return {"graph_features": torch.stack(graph_features, dim=0)}
+
+
+class _TensorOnlyBackbone(BaseBackbone):
+    """Backbone that returns a bare tensor instead of the required mapping."""
+
+    @property
+    def output_dim(self) -> int:
+        return 2
+
+    def forward(self, batch: Batch) -> dict[str, torch.Tensor]:
+        graph_features = []
+        for graph_index in range(batch.num_graphs):
+            mask = batch.batch == graph_index
+            graph_features.append(batch.x[mask].mean(dim=0))
+        return torch.stack(graph_features, dim=0)  # type: ignore[return-value]
 
 
 def save_lightning_checkpoint(path: Path, state_dict: dict[str, torch.Tensor]) -> Path:
@@ -227,6 +277,36 @@ def test_configure_optimizers_defaults_to_adamw_and_plateau_monitor() -> None:
     assert optimizer.defaults["weight_decay"] == 0.1
     assert scheduler["monitor"] == "val/loss"
     assert isinstance(scheduler["scheduler"], torch.optim.lr_scheduler.ReduceLROnPlateau)
+
+
+def test_model_rejects_backbones_that_do_not_implement_base_contract() -> None:
+    """Arbitrary nn.Module backbones should not bypass the shared backbone interface."""
+    with pytest.raises(TypeError, match="BaseBackbone"):
+        MoMLCAModel(backbone=_PlainModuleBackbone())
+
+
+def test_model_rejects_backbone_outputs_missing_node_features() -> None:
+    """Backbones must provide both node and graph features under the shared schema."""
+    batch = make_batch()
+    model = MoMLCAModel(
+        backbone=_MissingNodeFeaturesBackbone(),
+        heads={"property": RecordingHead()},
+    )
+
+    with pytest.raises(ValueError, match="node_features"):
+        model.forward(batch)
+
+
+def test_model_rejects_backbone_outputs_that_are_not_mappings() -> None:
+    """Backbones must return a mapping, not a bare tensor."""
+    batch = make_batch()
+    model = MoMLCAModel(
+        backbone=_TensorOnlyBackbone(),
+        heads={"property": RecordingHead()},
+    )
+
+    with pytest.raises(ValueError, match="Backbone must return a mapping"):
+        model.forward(batch)
 
 
 def test_pretrained_lightning_checkpoint_loads_backbone_only_and_keeps_heads_fresh(
@@ -619,6 +699,7 @@ def test_hydra_instantiates_model_with_pfasbench_config() -> None:
 
     assert isinstance(model, MoMLCAModel)
     assert isinstance(datamodule, PFASBenchDataModule)
+    assert model.backbone.output_dim == 128
 
 
 def test_hydra_instantiates_distinct_painn_stage_backbone() -> None:
@@ -638,6 +719,7 @@ def test_hydra_instantiates_distinct_painn_stage_backbone() -> None:
 
     assert isinstance(model, MoMLCAModel)
     assert isinstance(model.backbone, PaiNNStageBackbone)
+    assert model.backbone.output_dim == 128
 
 
 def test_train_fast_dev_run_with_momlca_uses_default_callbacks(tmp_path: Path) -> None:
@@ -668,6 +750,47 @@ def test_train_fast_dev_run_with_momlca_uses_default_callbacks(tmp_path: Path) -
             cfg.logger = None
             cfg.extras.print_config = False
             cfg.extras.enforce_tags = False
+
+        HydraConfig().set_config(cfg)
+        metric_dict, _ = train(cfg)
+
+    GlobalHydra.instance().clear()
+
+    assert "train/loss" in metric_dict
+    assert "val/loss" in metric_dict
+    assert "train/mae_logS" in metric_dict
+    assert "val/mae_logS" in metric_dict
+
+
+def test_train_fast_dev_run_with_painn_backbone_uses_default_callbacks(tmp_path: Path) -> None:
+    """The real training path should also work with `model=painn` in fast-dev mode."""
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+
+    with initialize(version_base="1.3", config_path="../../../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=["model=painn", "data=pfasbench"],
+        )
+        with open_dict(cfg):
+            cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+            cfg.paths.output_dir = str(tmp_path / "outputs")
+            cfg.paths.log_dir = str(tmp_path / "outputs")
+            cfg.data.root = str(dataset_root)
+            cfg.data.batch_size = 2
+            cfg.data.num_workers = 0
+            cfg.data.split = "random"
+            cfg.data.train_frac = 0.5
+            cfg.data.val_frac = 0.25
+            cfg.data.test_frac = 0.25
+            cfg.trainer.fast_dev_run = True
+            cfg.trainer.accelerator = "cpu"
+            cfg.trainer.devices = 1
+            cfg.train.run_test = False
+            cfg.logger = None
+            cfg.extras.print_config = False
+            cfg.extras.enforce_tags = False
+            cfg.model.pretrained_backbone.checkpoint_path = None
 
         HydraConfig().set_config(cfg)
         metric_dict, _ = train(cfg)
