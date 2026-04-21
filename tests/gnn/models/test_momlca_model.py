@@ -17,7 +17,7 @@ from torch import nn
 from torch_geometric.data import Batch, Data
 
 from gnn.data.datamodules import PFASBenchDataModule
-from gnn.models import MoMLCAModel, PaiNNStageBackbone
+from gnn.models import GINBackbone, MoMLCAModel, PaiNNStageBackbone
 from gnn.models.backbones import BaseBackbone
 from src.train import train
 from tests.helpers.transfer_learning import TinyBackbone
@@ -752,6 +752,26 @@ def test_hydra_instantiates_distinct_painn_stage_backbone() -> None:
     assert model.backbone.output_dim == 128
 
 
+def test_hydra_instantiates_distinct_gin_backbone() -> None:
+    """The `model=gin` override should select a concrete backbone config."""
+    with initialize(version_base="1.3", config_path="../../../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=["model=gin", "data=pfasbench"],
+        )
+        with open_dict(cfg):
+            cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+
+        model = hydra.utils.instantiate(cfg.model)
+
+    GlobalHydra.instance().clear()
+
+    assert isinstance(model, MoMLCAModel)
+    assert isinstance(model.backbone, GINBackbone)
+    assert model.backbone.output_dim == 128
+
+
 def test_train_fast_dev_run_with_momlca_uses_default_callbacks(tmp_path: Path) -> None:
     """The real training path should work with `model=momlca` and the default callbacks."""
     dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
@@ -801,6 +821,47 @@ def test_train_fast_dev_run_with_painn_backbone_uses_default_callbacks(tmp_path:
             config_name="config.yaml",
             return_hydra_config=True,
             overrides=["model=painn", "data=pfasbench"],
+        )
+        with open_dict(cfg):
+            cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+            cfg.paths.output_dir = str(tmp_path / "outputs")
+            cfg.paths.log_dir = str(tmp_path / "outputs")
+            cfg.data.root = str(dataset_root)
+            cfg.data.batch_size = 2
+            cfg.data.num_workers = 0
+            cfg.data.split = "random"
+            cfg.data.train_frac = 0.5
+            cfg.data.val_frac = 0.25
+            cfg.data.test_frac = 0.25
+            cfg.trainer.fast_dev_run = True
+            cfg.trainer.accelerator = "cpu"
+            cfg.trainer.devices = 1
+            cfg.train.run_test = False
+            cfg.logger = None
+            cfg.extras.print_config = False
+            cfg.extras.enforce_tags = False
+            cfg.model.pretrained_backbone.checkpoint_path = None
+
+        HydraConfig().set_config(cfg)
+        metric_dict, _ = train(cfg)
+
+    GlobalHydra.instance().clear()
+
+    assert "train/loss" in metric_dict
+    assert "val/loss" in metric_dict
+    assert "train/mae_logS" in metric_dict
+    assert "val/mae_logS" in metric_dict
+
+
+def test_train_fast_dev_run_with_gin_backbone_uses_default_callbacks(tmp_path: Path) -> None:
+    """The real training path should also work with `model=gin` in fast-dev mode."""
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+
+    with initialize(version_base="1.3", config_path="../../../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=["model=gin", "data=pfasbench"],
         )
         with open_dict(cfg):
             cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))

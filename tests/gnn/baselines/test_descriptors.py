@@ -255,11 +255,7 @@ class TestDescriptorExtractor:
         tmp_path: Path,
     ) -> None:
         input_path = tmp_path / "pfasbench.csv"
-        input_path.write_text(
-            "smiles,name\n"
-            "C(=O)(C(F)(F)F)O,TFA\n"
-            "NOT_A_SMILES,BAD\n"
-        )
+        input_path.write_text("smiles,name\nC(=O)(C(F)(F)F)O,TFA\nNOT_A_SMILES,BAD\n")
 
         output_path = export_pfasbench_descriptors(
             input_path,

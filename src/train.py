@@ -54,9 +54,7 @@ def _cfg_value(cfg: DictConfig, runtime_cfg: DictConfig, key: str, runtime_key: 
     return runtime_cfg.get(runtime_key)
 
 
-def _disable_pretrained_backbone_for_resume(
-    cfg: DictConfig, runtime_cfg: DictConfig
-) -> str | None:
+def _disable_pretrained_backbone_for_resume(cfg: DictConfig, runtime_cfg: DictConfig) -> str | None:
     """Skip transfer-learning init when exact checkpoint resume is requested."""
     ckpt_path = _cfg_value(cfg, runtime_cfg, "ckpt_path", "ckpt_path")
     if ckpt_path in (None, ""):
