@@ -87,6 +87,32 @@ def test_canonical_train_entrypoint_supports_gin_override() -> None:
     assert cfg.data._target_ == "gnn.data.datamodules.PFASBenchDataModule"
 
 
+@pytest.mark.parametrize(
+    ("model_name", "backbone_target"),
+    [
+        ("gin", "gnn.models.backbones.GINBackbone"),
+        ("painn", "gnn.models.backbones.PaiNNBackbone"),
+    ],
+)
+def test_backbone_presets_auto_match_property_head_input_dim(
+    model_name: str, backbone_target: str
+) -> None:
+    """Backbone presets should keep default property-head width aligned automatically."""
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=[f"model={model_name}", "data=pfasbench"],
+        )
+        cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+        model = hydra.utils.instantiate(cfg.model)
+
+    GlobalHydra.instance().clear()
+
+    assert cfg.model.backbone._target_ == backbone_target
+    assert model.heads["property"].input_dim == model.backbone.output_dim
+
+
 def test_multiseed_train_preset_composes_with_canonical_entrypoint() -> None:
     """The optional multiseed train preset should compose without changing the entrypoint."""
     with initialize(version_base="1.3", config_path="../configs"):

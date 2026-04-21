@@ -28,6 +28,54 @@ def test_train_fast_dev_run(cfg_train: DictConfig) -> None:
     train(cfg_train)
 
 
+@pytest.mark.parametrize(
+    ("model_name", "expected_backbone_target"),
+    [
+        ("gin", "gnn.models.backbones.GINBackbone"),
+        ("painn", "gnn.models.backbones.PaiNNBackbone"),
+    ],
+)
+def test_train_fast_dev_run_supports_backbone_presets(
+    tmp_path: Path,
+    cfg_train: DictConfig,
+    model_name: str,
+    expected_backbone_target: str,
+) -> None:
+    """Canonical train() should run in fast-dev mode for backbone presets."""
+    project_root = Path(__file__).resolve().parents[1]
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+
+    with open_dict(cfg_train):
+        cfg_train.model = OmegaConf.load(project_root / f"configs/model/{model_name}.yaml")
+        cfg_train.data = OmegaConf.load(project_root / "configs/data/pfasbench.yaml")
+        cfg_train.paths.output_dir = str(tmp_path)
+        cfg_train.paths.log_dir = str(tmp_path)
+        cfg_train.trainer.fast_dev_run = True
+        cfg_train.trainer.accelerator = "cpu"
+        cfg_train.trainer.devices = 1
+        cfg_train.data.root = str(dataset_root)
+        cfg_train.data.batch_size = 2
+        cfg_train.data.num_workers = 0
+        cfg_train.data.split = "random"
+        cfg_train.data.train_frac = 0.5
+        cfg_train.data.val_frac = 0.25
+        cfg_train.data.test_frac = 0.25
+        cfg_train.train.run_test = False
+        cfg_train.test = False
+        cfg_train.logger = None
+        cfg_train.extras.print_config = False
+        cfg_train.extras.enforce_tags = False
+
+    HydraConfig().set_config(cfg_train)
+    metric_dict, object_dict = train(cfg_train)
+
+    model = object_dict["model"]
+    assert object_dict["cfg"].model.backbone._target_ == expected_backbone_target
+    assert model.heads["property"].input_dim == model.backbone.output_dim
+    assert "train/loss" in metric_dict
+    assert "val/loss" in metric_dict
+
+
 @RunIf(min_gpus=1)
 def test_train_fast_dev_run_gpu(cfg_train: DictConfig) -> None:
     """Run for 1 train, val and test step on GPU.
