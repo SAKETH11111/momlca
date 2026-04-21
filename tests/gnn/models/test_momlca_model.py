@@ -814,6 +814,7 @@ def test_hydra_instantiates_distinct_painn_backbone() -> None:
     assert isinstance(model, MoMLCAModel)
     assert isinstance(model.backbone, PaiNNBackbone)
     assert model.backbone.output_dim == 128
+    assert model.heads["property"].input_dim == model.backbone.output_dim
 
 
 def test_hydra_instantiates_distinct_painn_stage_backbone() -> None:
@@ -854,6 +855,7 @@ def test_hydra_instantiates_distinct_gin_backbone() -> None:
     assert isinstance(model, MoMLCAModel)
     assert isinstance(model.backbone, GINBackbone)
     assert model.backbone.output_dim == 128
+    assert model.heads["property"].input_dim == model.backbone.output_dim
 
 
 def test_train_fast_dev_run_with_momlca_uses_default_callbacks(tmp_path: Path) -> None:

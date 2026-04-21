@@ -31,7 +31,7 @@ def test_train_script_uses_canonical_config_and_persists_resolved_hydra_config(
     base_command = [
         sys.executable,
         "scripts/train.py",
-        "model=painn",
+        "model=gin",
         "data=pfasbench",
         "train.run_test=false",
         "trainer.accelerator=cpu",
@@ -67,7 +67,7 @@ def test_train_script_uses_canonical_config_and_persists_resolved_hydra_config(
 
     resolved_cfg = yaml.safe_load(hydra_config.read_text())
     assert resolved_cfg["model"]["_target_"] == "gnn.models.MoMLCAModel"
-    assert resolved_cfg["model"]["backbone"]["_target_"] == "gnn.models.backbones.PaiNNBackbone"
+    assert resolved_cfg["model"]["backbone"]["_target_"] == "gnn.models.backbones.GINBackbone"
     assert resolved_cfg["data"]["_target_"] == "gnn.data.datamodules.PFASBenchDataModule"
     assert resolved_cfg["trainer"]["max_epochs"] == 1
     assert resolved_cfg["train"]["run_test"] is False
@@ -100,6 +100,46 @@ def test_train_script_uses_canonical_config_and_persists_resolved_hydra_config(
     second_probe = json.loads(second_probe_path.read_text())
     assert second_probe["epoch"] == 1
     assert second_probe["global_step"] == first_global_step
+
+
+def test_train_script_supports_painn_fast_dev_run(tmp_path: Path) -> None:
+    """The train script should run a fast-dev PaiNN smoke run."""
+    dataset_root = write_sample_pfasbench_dataset(tmp_path / "data")
+    run_dir = tmp_path / "painn-fast-dev-run"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/train.py",
+            "model=painn",
+            "data=pfasbench",
+            "train.run_test=false",
+            "trainer.accelerator=cpu",
+            "trainer.devices=1",
+            "trainer.max_epochs=1",
+            "+trainer.limit_train_batches=1",
+            "+trainer.limit_val_batches=1",
+            "+trainer.num_sanity_val_steps=0",
+            "data.batch_size=2",
+            "data.num_workers=0",
+            "data.root=" + str(dataset_root),
+            "data.split=random",
+            "data.train_frac=0.5",
+            "data.val_frac=0.25",
+            "data.test_frac=0.25",
+            "extras.print_config=false",
+            "extras.enforce_tags=false",
+            "hydra.run.dir=" + str(run_dir),
+        ],
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+
+    hydra_config = run_dir / ".hydra" / "config.yaml"
+    assert hydra_config.exists()
+    resolved_cfg = yaml.safe_load(hydra_config.read_text())
+    assert resolved_cfg["model"]["backbone"]["_target_"] == "gnn.models.backbones.PaiNNBackbone"
+    assert (run_dir / "checkpoints" / "last.ckpt").exists()
 
 
 def test_train_script_accepts_finetune_config_without_overloading_resume_ckpt(
