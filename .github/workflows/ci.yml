@@ -66,6 +66,20 @@ jobs:
           virtualenvs-in-project: true
       - name: Install dependencies
         run: poetry install
+      - name: Install CPU PyTorch wheels
+        run: |
+          case "${{ matrix.python-version }}" in
+            "3.10"|"3.11")
+              poetry run pip install --force-reinstall --no-deps \
+                torch==2.1.0 torchvision==0.16.0 \
+                --index-url https://download.pytorch.org/whl/cpu
+              ;;
+            "3.12")
+              poetry run pip install --force-reinstall --no-deps \
+                torch==2.11.0 torchvision==0.26.0 \
+                --index-url https://download.pytorch.org/whl/cpu
+              ;;
+          esac
       - name: Materialize DVC-tracked artifacts
         run: poetry run dvc pull
       - name: Run tests
