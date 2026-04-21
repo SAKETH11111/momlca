@@ -65,6 +65,25 @@ def test_canonical_train_entrypoint_supports_gnn_overrides() -> None:
     assert cfg.trainer.max_epochs == 5
 
 
+def test_canonical_train_entrypoint_supports_gin_override() -> None:
+    """The canonical train entrypoint should compose the new GIN model preset."""
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(
+            config_name="config.yaml",
+            return_hydra_config=True,
+            overrides=["model=gin", "data=pfasbench"],
+        )
+        cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+
+    GlobalHydra.instance().clear()
+
+    assert cfg.model._target_ == "gnn.models.MoMLCAModel"
+    assert cfg.model.backbone._target_ == "gnn.models.backbones.GINBackbone"
+    assert cfg.model.backbone.hidden_channels == 128
+    assert cfg.model.backbone.num_layers == 4
+    assert cfg.data._target_ == "gnn.data.datamodules.PFASBenchDataModule"
+
+
 def test_multiseed_train_preset_composes_with_canonical_entrypoint() -> None:
     """The optional multiseed train preset should compose without changing the entrypoint."""
     with initialize(version_base="1.3", config_path="../configs"):

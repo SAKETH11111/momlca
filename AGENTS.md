@@ -23,6 +23,7 @@ These notes apply to the entire repository.
 - After a story is done, package it on its own delivery branch, commit the changes, and open a PR before moving on.
 - While that PR is under review, continue with the next planned story on a follow-up branch or continuation branch as directed by the user.
 - When review comments come back, fix real issues, update the branch, and merge before treating the story as fully landed.
+- External branch names must be product-focused and must not include internal workflow labels such as `bmad`, `epic`, or `story`.
 - In external delivery artifacts such as commit messages, PR titles, PR bodies, PR comments, and reviewer replies, do not mention internal workflow terms such as BMAD, epic, or story.
 - Keep external delivery language product-focused and implementation-focused only.
 - After opening a PR, request automated review by commenting `@coderabbitai review` and `@greptileai`.

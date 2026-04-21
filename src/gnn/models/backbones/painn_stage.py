@@ -6,8 +6,10 @@ import torch
 from torch_geometric.data import Batch
 
 from gnn.models.backbones.base import BackboneOutput, BaseBackbone
+from gnn.models.backbones.registry import register_backbone
 
 
+@register_backbone("painn")
 class PaiNNStageBackbone(BaseBackbone):
     """Lightweight graph backbone that reserves a distinct `model=painn` path.
 
