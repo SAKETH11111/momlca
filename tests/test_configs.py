@@ -61,6 +61,7 @@ def test_canonical_train_entrypoint_supports_gnn_overrides() -> None:
     assert cfg.train.run_train is True
     assert cfg.train.run_test is True
     assert cfg.model._target_ == "gnn.models.MoMLCAModel"
+    assert cfg.model.backbone._target_ == "gnn.models.backbones.PaiNNBackbone"
     assert cfg.data._target_ == "gnn.data.datamodules.PFASBenchDataModule"
     assert cfg.trainer.max_epochs == 5
 

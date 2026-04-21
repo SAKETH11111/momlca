@@ -9,13 +9,12 @@ from gnn.models.backbones.base import BackboneOutput, BaseBackbone
 from gnn.models.backbones.registry import register_backbone
 
 
-@register_backbone("painn")
+@register_backbone("painn_stage")
 class PaiNNStageBackbone(BaseBackbone):
-    """Lightweight graph backbone that reserves a distinct `model=painn` path.
+    """Legacy warm-start shim retained for the `model=painn_stage` preset.
 
-    This is intentionally a small shell so the Hydra config tree can expose a
-    dedicated PaiNN branch before the full equivariant implementation is
-    delivered.
+    Fine-tune presets still rely on the historical stage checkpoint seam, while
+    new 3D PaiNN runs should use `model=painn` and `PaiNNBackbone`.
     """
 
     def __init__(self, hidden_channels: int = 128, use_positions: bool = True) -> None:

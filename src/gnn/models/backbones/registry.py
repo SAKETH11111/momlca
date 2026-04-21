@@ -10,6 +10,7 @@ from gnn.models.backbones.base import BaseBackbone
 _BACKBONE_REGISTRY: dict[str, type[BaseBackbone]] = {}
 _BUILTIN_BACKBONE_MODULES: tuple[str, ...] = (
     "gnn.models.backbones.gin",
+    "gnn.models.backbones.painn",
     "gnn.models.backbones.painn_stage",
 )
 

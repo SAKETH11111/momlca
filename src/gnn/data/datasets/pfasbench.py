@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os.path as osp
+import zlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +22,11 @@ from gnn.data.transforms import mol_to_pyg_data
 from gnn.exceptions import FeaturizationError, InvalidSMILESError
 
 logger = logging.getLogger(__name__)
+
+
+def _stable_conformer_seed(smiles: str) -> int:
+    """Derive a deterministic ETKDG seed from canonical SMILES."""
+    return zlib.crc32(smiles.encode("utf-8")) & 0x7FFFFFFF
 
 
 class PFASBenchDataset(InMemoryDataset):
@@ -69,7 +75,25 @@ class PFASBenchDataset(InMemoryDataset):
         resolved_root = self._resolve_dataset_root(root)
         super().__init__(resolved_root, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
+        self._ensure_positions_in_cache()
         self._upgrade_labels_if_needed()
+
+    def _ensure_positions_in_cache(self) -> None:
+        """Rebuild stale cached datasets that predate mandatory 3D positions."""
+        data = getattr(self, "_data", None)
+        if data is None:
+            return
+
+        pos = getattr(data, "pos", None)
+        if isinstance(pos, torch.Tensor) and pos.ndim == 2 and pos.shape[-1] == 3:
+            return
+
+        logger.info(
+            "Reprocessing PFASBench cache at %s to add deterministic 3D positions.",
+            self.processed_paths[0],
+        )
+        self.process()
+        self.load(self.processed_paths[0])
 
     def _upgrade_labels_if_needed(self) -> None:
         """Upgrade cached labels to row-vector format if needed.
@@ -222,7 +246,12 @@ class PFASBenchDataset(InMemoryDataset):
                 continue
 
             try:
-                data = mol_to_pyg_data(mol, include_pos=False)
+                canonical_smiles = Chem.MolToSmiles(mol, canonical=True)
+                data = mol_to_pyg_data(
+                    mol,
+                    include_pos=True,
+                    pos_random_seed=_stable_conformer_seed(canonical_smiles),
+                )
             except FeaturizationError as e:
                 logger.warning("Skipping molecule %d (%s): %s", idx, row.get("smiles"), e)
                 skipped += 1
@@ -250,7 +279,7 @@ class PFASBenchDataset(InMemoryDataset):
             data.y = torch.tensor([y_values], dtype=torch.float32)
 
             # Add metadata
-            data.smiles = Chem.MolToSmiles(mol, canonical=True)
+            data.smiles = canonical_smiles
             name = row.get("name", "")
             data.name = "" if pd.isna(name) else str(name)
             try:
