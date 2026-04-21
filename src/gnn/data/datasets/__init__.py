@@ -5,7 +5,17 @@ for various molecular benchmark datasets.
 """
 
 from .pfasbench import PFASBenchDataset
+from .registry import (
+    get_dataset,
+    get_dataset_class,
+    register_dataset,
+    registered_datasets,
+)
 
 __all__ = [
     "PFASBenchDataset",
+    "get_dataset",
+    "get_dataset_class",
+    "register_dataset",
+    "registered_datasets",
 ]

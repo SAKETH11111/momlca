@@ -1,7 +1,13 @@
 """Data loading and processing utilities."""
 
 from .datamodules import PFASBenchDataModule
-from .datasets import PFASBenchDataset
+from .datasets import (
+    PFASBenchDataset,
+    get_dataset,
+    get_dataset_class,
+    register_dataset,
+    registered_datasets,
+)
 from .loaders import load_mol, load_sdf, load_smiles
 from .splits import (
     get_chain_length,
@@ -28,6 +34,10 @@ __all__ = [
     "PFASBenchDataModule",
     # Datasets
     "PFASBenchDataset",
+    "get_dataset",
+    "get_dataset_class",
+    "register_dataset",
+    "registered_datasets",
     # Loaders
     "load_smiles",
     "load_sdf",
