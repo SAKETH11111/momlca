@@ -80,6 +80,7 @@ jobs:
                 --index-url https://download.pytorch.org/whl/cpu
               ;;
           esac
+          poetry run pip install --force-reinstall --no-deps "numpy<2"
       - name: Materialize DVC-tracked artifacts
         run: poetry run dvc pull
       - name: Run tests
