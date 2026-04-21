@@ -14,6 +14,7 @@ from torch import nn
 from torch_geometric.data import Batch
 
 from gnn.models.backbones.base import BackboneOutput, BaseBackbone
+from gnn.models.heads import PropertyHead
 
 DEFAULT_PROPERTY_NAMES: tuple[str, ...] = ("logS", "logP", "pKa")
 
@@ -47,17 +48,6 @@ class _MeanPoolBackbone(BaseBackbone):
             "node_features": node_features,
             "graph_features": torch.stack(graph_features, dim=0),
         }
-
-
-class _LinearPropertyHead(nn.Module):
-    """Fallback property head that lazily projects graph features to targets."""
-
-    def __init__(self, output_dim: int) -> None:
-        super().__init__()
-        self.proj = nn.LazyLinear(output_dim)
-
-    def forward(self, features: torch.Tensor) -> torch.Tensor:
-        return self.proj(features)
 
 
 class MoMLCAModel(LightningModule):
@@ -232,13 +222,34 @@ class MoMLCAModel(LightningModule):
             )
         return loss, metrics
 
-    def _select_property_predictions(self, predictions: Mapping[str, torch.Tensor]) -> torch.Tensor:
+    def _select_property_predictions(self, predictions: Mapping[str, Any]) -> torch.Tensor:
         if "property" in predictions:
-            return predictions["property"]
+            return self._extract_prediction_tensor(predictions["property"])
         if len(predictions) == 1:
-            return next(iter(predictions.values()))
+            return self._extract_prediction_tensor(next(iter(predictions.values())))
         raise ValueError(
             "MoMLCAModel requires a 'property' head or exactly one prediction head for regression."
+        )
+
+    def _extract_prediction_tensor(self, head_output: Any) -> torch.Tensor:
+        """Normalize a head output into the tensor used for loss/metric computation."""
+        if isinstance(head_output, torch.Tensor):
+            return head_output
+        if isinstance(head_output, Mapping):
+            log_variance = head_output.get("log_variance")
+            if log_variance is not None and not isinstance(log_variance, torch.Tensor):
+                raise ValueError(
+                    "Head output mappings may include a tensor-valued 'log_variance' entry."
+                )
+            predictions = head_output.get("predictions")
+            if isinstance(predictions, torch.Tensor):
+                return predictions
+            raise ValueError(
+                "Head output mappings must include a tensor-valued 'predictions' entry."
+            )
+        raise ValueError(
+            "Head outputs must be either tensors or mappings with a tensor-valued "
+            "'predictions' entry."
         )
 
     def _resolve_head_inputs(self, head_name: str, backbone_outputs: Any) -> Any:
@@ -312,8 +323,9 @@ class MoMLCAModel(LightningModule):
             normalized_heads = nn.ModuleDict(dict(heads))
 
         if len(normalized_heads) == 0:
-            normalized_heads["property"] = _LinearPropertyHead(
-                output_dim=max(len(self.property_names), 1)
+            normalized_heads["property"] = PropertyHead(
+                input_dim=self.backbone.output_dim,
+                output_dim=len(self.property_names),
             )
 
         return normalized_heads
