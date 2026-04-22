@@ -164,7 +164,7 @@ class PFASBenchDataModule(LightningDataModule):
         elif stage == "test":
             self.test_dataset = self.dataset[self.test_idx]
         elif stage == "predict":
-            self.predict_dataset = self.dataset
+            self.predict_dataset = self.dataset[self.test_idx]
         else:
             raise ValueError(f"Unknown stage: {stage}")
 

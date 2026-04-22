@@ -57,7 +57,8 @@ def cfg_eval_global() -> DictConfig:
             cfg.trainer.accelerator = "cpu"
             cfg.trainer.devices = 1
             cfg.data.num_workers = 0
-            cfg.data.pin_memory = False
+            if "pin_memory" in cfg.data:
+                cfg.data.pin_memory = False
             cfg.extras.print_config = False
             cfg.extras.enforce_tags = False
             cfg.logger = None

@@ -382,6 +382,42 @@ def test_step_methods_mask_nan_targets_and_log_regression_metrics() -> None:
         )
 
 
+def test_predict_step_returns_export_ready_batch_payload() -> None:
+    """Predict step should expose tensors and sample metadata for JSON export."""
+    batch = make_batch()
+    batch.smiles = ["C(=O)(O)C(F)(F)F", "c1ccccc1"]
+    batch.name = ["TFA", "Benzene"]
+    batch.inchikey = [
+        "ZKHQWZAMYRWXGA-UHFFFAOYSA-N",
+        "UHOVQNZJYSORNB-UHFFFAOYSA-N",
+    ]
+    model = MoMLCAModel(
+        backbone=RecordingBackbone(),
+        heads={
+            "property": PropertyHead(
+                input_dim=RecordingBackbone().output_dim,
+                output_dim=3,
+                hidden_dims=(4,),
+                uncertainty=True,
+            )
+        },
+        property_names=["logS", "logP", "pKa"],
+    )
+
+    prediction_payload = model.predict_step(batch, batch_idx=0)
+
+    assert prediction_payload["predictions"].shape == (batch.num_graphs, 3)
+    assert prediction_payload["targets"].shape == (batch.num_graphs, 3)
+    assert prediction_payload["log_variance"].shape == (batch.num_graphs, 3)
+    assert prediction_payload["property_names"] == ["logS", "logP", "pKa"]
+    assert prediction_payload["smiles"] == ["C(=O)(O)C(F)(F)F", "c1ccccc1"]
+    assert prediction_payload["name"] == ["TFA", "Benzene"]
+    assert prediction_payload["inchikey"] == [
+        "ZKHQWZAMYRWXGA-UHFFFAOYSA-N",
+        "UHOVQNZJYSORNB-UHFFFAOYSA-N",
+    ]
+
+
 def test_configure_optimizers_defaults_to_adamw_and_plateau_monitor() -> None:
     """The optimizer wiring should default to AdamW and expose val/loss for plateau schedulers."""
     model = MoMLCAModel(

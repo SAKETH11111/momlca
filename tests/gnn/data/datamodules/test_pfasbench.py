@@ -218,6 +218,24 @@ class TestPFASBenchDataModule:
         assert predict_loader is not None
         assert hasattr(predict_loader, "__iter__")
 
+    def test_predict_stage_uses_test_split_only(self, temp_dataset_dir: Path):
+        """Predict stage should mirror held-out test split for evaluation export."""
+        dm = PFASBenchDataModule(
+            root=str(temp_dataset_dir),
+            split="random",
+            seed=42,
+            train_frac=0.5,
+            val_frac=0.25,
+            test_frac=0.25,
+        )
+        dm.setup(stage="predict")
+
+        assert dm.dataset is not None
+        assert dm.predict_dataset is not None
+        assert dm.test_idx is not None
+        assert len(dm.predict_dataset) == len(dm.test_idx)
+        assert len(dm.predict_dataset) < len(dm.dataset)
+
     def test_batch_has_correct_structure(self, temp_dataset_dir: Path):
         """Test that batches from dataloaders have correct PyG structure."""
         dm = PFASBenchDataModule(root=str(temp_dataset_dir), batch_size=4)

@@ -1,11 +1,13 @@
 import inspect
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import hydra
 import rootutils
 from lightning import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, open_dict
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -25,6 +27,11 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # more info: https://github.com/ashleve/rootutils
 # ------------------------------------------------------------------------------------ #
 
+from gnn.evaluation.export import (
+    build_prediction_records,
+    export_prediction_records,
+    maybe_log_prediction_artifact,
+)
 from src.utils import (
     RankedLogger,
     extras,
@@ -36,8 +43,79 @@ from src.utils import (
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
+def _supports_kwarg(callable_obj: object, parameter_name: str) -> bool:
+    return parameter_name in inspect.signature(callable_obj).parameters
+
+
 def _supports_weights_only(callable_obj: object) -> bool:
-    return "weights_only" in inspect.signature(callable_obj).parameters
+    return _supports_kwarg(callable_obj, "weights_only")
+
+
+def _disable_pretrained_backbone_for_resume(cfg: DictConfig) -> str | None:
+    """Skip transfer-learning backbone init when exact checkpoint eval is requested."""
+    ckpt_path = cfg.get("ckpt_path")
+    if ckpt_path in (None, ""):
+        return None
+
+    model_cfg = cfg.get("model")
+    if model_cfg is None:
+        return None
+
+    pretrained_backbone_cfg = model_cfg.get("pretrained_backbone")
+    if pretrained_backbone_cfg is None:
+        return None
+
+    checkpoint_path = pretrained_backbone_cfg.get("checkpoint_path")
+    if checkpoint_path in (None, ""):
+        return None
+
+    with open_dict(model_cfg):
+        model_cfg.pretrained_backbone.checkpoint_path = None
+    return str(checkpoint_path)
+
+
+def _to_scalar(value: Any) -> float | None:
+    if hasattr(value, "detach"):
+        detached = value.detach()
+        if detached.numel() != 1:
+            return None
+        return float(detached.cpu().item())
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _summarize_test_metrics(metric_dict: Mapping[str, Any]) -> dict[str, float]:
+    summary: dict[str, float] = {}
+    for metric_name, metric_value in metric_dict.items():
+        if not str(metric_name).startswith("test/"):
+            continue
+        scalar = _to_scalar(metric_value)
+        if scalar is None:
+            continue
+        summary[str(metric_name)] = scalar
+    return summary
+
+
+def _flatten_prediction_outputs(predictions: Any) -> list[dict[str, Any]]:
+    if predictions is None:
+        return []
+
+    flattened: list[dict[str, Any]] = []
+    queue: list[Any] = [predictions]
+    while queue:
+        current = queue.pop(0)
+        if isinstance(current, Mapping):
+            flattened.append(dict(current))
+            continue
+        if isinstance(current, Sequence) and not isinstance(current, (str, bytes)):
+            queue.extend(list(current))
+            continue
+        raise TypeError(
+            "Prediction export expects mapping outputs from model.predict_step(), "
+            f"received unsupported type: {type(current).__name__}"
+        )
+    return flattened
 
 
 @task_wrapper
@@ -51,6 +129,13 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     :return: Tuple[dict, dict] with metrics and dict with all instantiated objects.
     """
     assert cfg.ckpt_path
+
+    skipped_pretrained_checkpoint = _disable_pretrained_backbone_for_resume(cfg)
+    if skipped_pretrained_checkpoint is not None:
+        log.info(
+            "Skipping pretrained backbone initialization because ckpt_path evaluation takes "
+            f"precedence: {skipped_pretrained_checkpoint}"
+        )
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
@@ -86,6 +171,64 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     # predictions = trainer.predict(model=model, dataloaders=dataloaders, ckpt_path=cfg.ckpt_path)
 
     metric_dict = trainer.callback_metrics
+
+    metric_summary = _summarize_test_metrics(metric_dict)
+    if metric_summary:
+        summary_text = ", ".join(
+            f"{metric_name}={metric_value:.6f}"
+            for metric_name, metric_value in sorted(metric_summary.items())
+        )
+        log.info(f"Evaluation metric summary: {summary_text}")
+
+    if cfg.get("export_predictions", False):
+        split_name = str(cfg.get("prediction_split", "test"))
+        if split_name != "test":
+            raise ValueError(
+                "Evaluation prediction export currently supports only prediction_split='test'"
+            )
+
+        predict_kwargs: dict[str, Any] = {}
+        if _supports_weights_only(trainer.predict):
+            predict_kwargs["weights_only"] = False
+        if _supports_kwarg(trainer.predict, "return_predictions"):
+            predict_kwargs["return_predictions"] = True
+
+        log.info("Collecting test predictions for export...")
+        raw_predictions = trainer.predict(
+            model=model,
+            datamodule=datamodule,
+            ckpt_path=cfg.ckpt_path,
+            **predict_kwargs,
+        )
+        prediction_batches = _flatten_prediction_outputs(raw_predictions)
+
+        property_names = getattr(model, "property_names", None)
+        records = build_prediction_records(
+            prediction_batches=prediction_batches,
+            split_name=split_name,
+            checkpoint_path=str(cfg.ckpt_path),
+            property_names=list(property_names) if property_names is not None else None,
+        )
+
+        export_dir = Path(str(cfg.get("prediction_export_dir", cfg.paths.output_dir)))
+        export_path = export_prediction_records(
+            records=records,
+            output_dir=export_dir,
+            split_name=split_name,
+            checkpoint_path=str(cfg.ckpt_path),
+            property_names=list(property_names) if property_names is not None else None,
+        )
+        log.info(f"Exported {len(records)} {split_name} predictions to {export_path}")
+
+        if cfg.get("log_prediction_artifact", False):
+            maybe_log_prediction_artifact(
+                loggers=logger,
+                prediction_path=export_path,
+                records=records,
+                artifact_name=str(cfg.get("prediction_artifact_name", "eval-predictions")),
+                split_name=split_name,
+                max_rows=int(cfg.get("prediction_table_rows", 25)),
+            )
 
     return metric_dict, object_dict
 
