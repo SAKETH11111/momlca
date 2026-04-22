@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import hydra
 import pytest
@@ -10,7 +11,11 @@ from hydra.core.global_hydra import GlobalHydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
-from src.eval import _disable_pretrained_backbone_for_resume, evaluate
+from src.eval import (
+    _disable_pretrained_backbone_for_resume,
+    _supports_prediction_collection,
+    evaluate,
+)
 from src.train import train
 
 
@@ -54,6 +59,22 @@ def test_eval_checkpoint_path_disables_pretrained_backbone_checkpoint() -> None:
     assert skipped_checkpoint == "/tmp/pretrained.ckpt"
     assert cfg.model.pretrained_backbone.checkpoint_path is None
     GlobalHydra.instance().clear()
+
+
+def test_supports_prediction_collection_blocks_spawn_and_fork_strategies() -> None:
+    """Prediction collection should be disabled for spawn/fork launchers."""
+    spawn_trainer = SimpleNamespace(
+        strategy=SimpleNamespace(strategy_name="ddp_spawn", launcher=SimpleNamespace())
+    )
+    fork_launcher = type("ForkLauncher", (), {})()
+    fork_trainer = SimpleNamespace(
+        strategy=SimpleNamespace(strategy_name="ddp", launcher=fork_launcher)
+    )
+    ddp_trainer = SimpleNamespace(strategy=SimpleNamespace(strategy_name="ddp", launcher=None))
+
+    assert _supports_prediction_collection(spawn_trainer) is False
+    assert _supports_prediction_collection(fork_trainer) is False
+    assert _supports_prediction_collection(ddp_trainer) is True
 
 
 @pytest.mark.slow

@@ -1,4 +1,5 @@
 import inspect
+from collections import deque
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -47,8 +48,20 @@ def _supports_kwarg(callable_obj: object, parameter_name: str) -> bool:
     return parameter_name in inspect.signature(callable_obj).parameters
 
 
-def _supports_weights_only(callable_obj: object) -> bool:
-    return _supports_kwarg(callable_obj, "weights_only")
+def _supports_prediction_collection(trainer: Trainer) -> bool:
+    strategy = getattr(trainer, "strategy", None)
+    if strategy is None:
+        return True
+
+    strategy_name = str(getattr(strategy, "strategy_name", "")).lower()
+    launcher = getattr(strategy, "launcher", None)
+    launcher_name = launcher.__class__.__name__.lower() if launcher is not None else ""
+    disallowed_tokens = ("spawn", "fork")
+
+    return not (
+        any(token in strategy_name for token in disallowed_tokens)
+        or any(token in launcher_name for token in disallowed_tokens)
+    )
 
 
 def _disable_pretrained_backbone_for_resume(cfg: DictConfig) -> str | None:
@@ -102,9 +115,9 @@ def _flatten_prediction_outputs(predictions: Any) -> list[dict[str, Any]]:
         return []
 
     flattened: list[dict[str, Any]] = []
-    queue: list[Any] = [predictions]
+    queue: deque[Any] = deque([predictions])
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if isinstance(current, Mapping):
             flattened.append(dict(current))
             continue
@@ -162,10 +175,7 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         log_hyperparameters(object_dict)
 
     log.info("Starting testing!")
-    test_kwargs = {}
-    if _supports_weights_only(trainer.test):
-        test_kwargs["weights_only"] = False
-    trainer.test(model=model, datamodule=datamodule, ckpt_path=cfg.ckpt_path, **test_kwargs)
+    trainer.test(model=model, datamodule=datamodule, ckpt_path=cfg.ckpt_path)
 
     # for predictions use trainer.predict(...)
     # predictions = trainer.predict(model=model, dataloaders=dataloaders, ckpt_path=cfg.ckpt_path)
@@ -188,10 +198,20 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
             )
 
         predict_kwargs: dict[str, Any] = {}
-        if _supports_weights_only(trainer.predict):
-            predict_kwargs["weights_only"] = False
-        if _supports_kwarg(trainer.predict, "return_predictions"):
+        if _supports_kwarg(
+            trainer.predict, "return_predictions"
+        ) and _supports_prediction_collection(trainer):
             predict_kwargs["return_predictions"] = True
+        elif _supports_kwarg(trainer.predict, "return_predictions"):
+            strategy_name = str(
+                getattr(getattr(trainer, "strategy", None), "strategy_name", "unknown")
+            )
+            log.warning(
+                "Prediction export requested with distributed strategy '%s' that does not "
+                "support return_predictions=True. Continuing without forcing prediction "
+                "collection; export may contain zero records.",
+                strategy_name,
+            )
 
         log.info("Collecting test predictions for export...")
         raw_predictions = trainer.predict(

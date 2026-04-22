@@ -72,3 +72,60 @@ def test_export_prediction_records_writes_deterministic_payload(tmp_path: Path) 
     assert payload["metadata"]["property_names"] == ["logS"]
     assert payload["metadata"]["num_records"] == 1
     assert payload["records"] == records
+
+
+def test_build_prediction_records_handles_non_finite_values(tmp_path: Path) -> None:
+    """Non-finite values should serialize as null instead of crashing JSON export."""
+    batches = [
+        {
+            "predictions": torch.tensor([[float("inf"), float("-inf"), float("nan")]]),
+            "targets": torch.tensor([[1.0, 2.0, 3.0]]),
+            "smiles": ["C"],
+            "name": ["Methane"],
+            "inchikey": ["VNWKTOKETHGBQD-UHFFFAOYSA-N"],
+        }
+    ]
+
+    records = build_prediction_records(
+        prediction_batches=batches,
+        split_name="test",
+        checkpoint_path="/tmp/checkpoints/best.ckpt",
+        property_names=["logS", "logP", "pKa"],
+    )
+
+    assert records[0]["predictions"] == {"logS": None, "logP": None, "pKa": None}
+    assert records[0]["residuals"] == {"logS": None, "logP": None, "pKa": None}
+
+    export_path = export_prediction_records(
+        records=records,
+        output_dir=tmp_path,
+        split_name="test",
+        checkpoint_path="/tmp/checkpoints/best.ckpt",
+        property_names=["logS", "logP", "pKa"],
+    )
+    payload = json.loads(export_path.read_text())
+    assert payload["records"][0]["predictions"] == {"logS": None, "logP": None, "pKa": None}
+
+
+def test_build_prediction_records_computes_residuals_from_raw_values() -> None:
+    """Residuals should be computed before per-field rounding is applied."""
+    batches = [
+        {
+            "predictions": torch.tensor([[1.2345674]], dtype=torch.float32),
+            "targets": torch.tensor([[1.2345666]], dtype=torch.float32),
+            "smiles": ["C"],
+            "name": ["Methane"],
+            "inchikey": ["VNWKTOKETHGBQD-UHFFFAOYSA-N"],
+        }
+    ]
+
+    records = build_prediction_records(
+        prediction_batches=batches,
+        split_name="test",
+        checkpoint_path="/tmp/checkpoints/best.ckpt",
+        property_names=["logS"],
+    )
+
+    assert records[0]["predictions"]["logS"] == 1.234567
+    assert records[0]["targets"]["logS"] == 1.234567
+    assert records[0]["residuals"]["logS"] == 0.000001
