@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def _as_float(value: float) -> float | None:
     scalar = float(value)
-    if math.isnan(scalar):
+    if not math.isfinite(scalar):
         return None
     return round(scalar, 6)
 
@@ -133,15 +133,19 @@ def build_prediction_records(
                 if target_tensor is not None
                 else dict.fromkeys(names)
             )
-            residual_map: dict[str, float | None] = {}
-            for name in names:
-                prediction_value = prediction_map[name]
-                target_value = target_map[name]
-                residual_map[name] = (
-                    None
-                    if prediction_value is None or target_value is None
-                    else _as_float(prediction_value - target_value)
-                )
+            residual_map: dict[str, float | None] = dict.fromkeys(names)
+            if target_tensor is not None:
+                for property_index, name in enumerate(names):
+                    prediction_value = prediction_map[name]
+                    target_value = target_map[name]
+                    residual_map[name] = (
+                        None
+                        if prediction_value is None or target_value is None
+                        else _as_float(
+                            float(predictions[row_index, property_index])
+                            - float(target_tensor[row_index, property_index])
+                        )
+                    )
 
             record: dict[str, Any] = {
                 "split": split_name,

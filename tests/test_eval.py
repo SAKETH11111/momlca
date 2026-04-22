@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import hydra
 import pytest
@@ -10,7 +11,12 @@ from hydra.core.global_hydra import GlobalHydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
-from src.eval import _disable_pretrained_backbone_for_resume, evaluate
+from src.eval import (
+    _disable_pretrained_backbone_for_resume,
+    _predict_kwargs_for_export,
+    _supports_prediction_collection,
+    evaluate,
+)
 from src.train import train
 
 
@@ -54,6 +60,64 @@ def test_eval_checkpoint_path_disables_pretrained_backbone_checkpoint() -> None:
     assert skipped_checkpoint == "/tmp/pretrained.ckpt"
     assert cfg.model.pretrained_backbone.checkpoint_path is None
     GlobalHydra.instance().clear()
+
+
+def test_supports_prediction_collection_blocks_spawn_and_fork_strategies() -> None:
+    """Prediction collection should be disabled for spawn/fork launchers."""
+    spawn_trainer = SimpleNamespace(
+        strategy=SimpleNamespace(strategy_name="ddp_spawn", launcher=SimpleNamespace())
+    )
+    fork_launcher = type("ForkLauncher", (), {})()
+    fork_trainer = SimpleNamespace(
+        strategy=SimpleNamespace(strategy_name="ddp", launcher=fork_launcher)
+    )
+    ddp_trainer = SimpleNamespace(strategy=SimpleNamespace(strategy_name="ddp", launcher=None))
+
+    assert _supports_prediction_collection(spawn_trainer) is False
+    assert _supports_prediction_collection(fork_trainer) is False
+    assert _supports_prediction_collection(ddp_trainer) is True
+
+
+def test_predict_kwargs_for_export_enables_weights_only_and_return_predictions() -> None:
+    """Prediction export should force full checkpoint loading and prediction collection."""
+
+    class _Trainer:
+        strategy = SimpleNamespace(strategy_name="ddp", launcher=None)
+
+        def predict(
+            self,
+            *,
+            model: object | None = None,
+            datamodule: object | None = None,
+            return_predictions: bool | None = None,
+            ckpt_path: str | None = None,
+            weights_only: bool | None = None,
+        ) -> list[dict[str, object]]:
+            return []
+
+    predict_kwargs = _predict_kwargs_for_export(_Trainer())
+    assert predict_kwargs == {"weights_only": False, "return_predictions": True}
+
+
+def test_predict_kwargs_for_export_rejects_spawn_and_fork_strategies() -> None:
+    """Prediction export should fail fast on unsupported distributed strategies."""
+
+    class _Trainer:
+        strategy = SimpleNamespace(strategy_name="ddp_spawn", launcher=SimpleNamespace())
+
+        def predict(
+            self,
+            *,
+            model: object | None = None,
+            datamodule: object | None = None,
+            return_predictions: bool | None = None,
+            ckpt_path: str | None = None,
+            weights_only: bool | None = None,
+        ) -> list[dict[str, object]]:
+            return []
+
+    with pytest.raises(RuntimeError, match="does not support prediction collection"):
+        _predict_kwargs_for_export(_Trainer())
 
 
 @pytest.mark.slow
