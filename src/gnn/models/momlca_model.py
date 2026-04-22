@@ -150,6 +150,49 @@ class MoMLCAModel(LightningModule):
         """Compute and log masked regression metrics for a test batch."""
         self._shared_step(batch, stage="test")
 
+    def predict_step(
+        self,
+        batch: Batch,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> dict[str, Any]:
+        """Return export-friendly prediction payloads for evaluation-time serialization."""
+        del batch_idx, dataloader_idx
+
+        outputs = self.forward(batch)
+        property_output = outputs["predictions"].get("property")
+        if property_output is None and len(outputs["predictions"]) == 1:
+            property_output = next(iter(outputs["predictions"].values()))
+        if property_output is None:
+            raise ValueError(
+                "MoMLCAModel prediction export requires a 'property' head or exactly one head."
+            )
+
+        predictions = self._extract_prediction_tensor(property_output)
+        predictions_matrix, _ = self._ensure_target_matrix(predictions, predictions)
+        payload: dict[str, Any] = {
+            "predictions": predictions_matrix.detach().cpu(),
+            "property_names": self._resolve_property_names(
+                num_targets=predictions_matrix.shape[-1]
+            ),
+            "smiles": self._batch_text_field(batch, "smiles", predictions_matrix.shape[0]),
+            "name": self._batch_text_field(batch, "name", predictions_matrix.shape[0]),
+            "inchikey": self._batch_text_field(batch, "inchikey", predictions_matrix.shape[0]),
+        }
+
+        targets = getattr(batch, "y", None)
+        if isinstance(targets, torch.Tensor):
+            _, targets_matrix = self._ensure_target_matrix(predictions, targets)
+            payload["targets"] = targets_matrix.detach().cpu()
+
+        if isinstance(property_output, Mapping):
+            log_variance = property_output.get("log_variance")
+            if isinstance(log_variance, torch.Tensor):
+                log_variance_matrix, _ = self._ensure_target_matrix(log_variance, log_variance)
+                payload["log_variance"] = log_variance_matrix.detach().cpu()
+
+        return payload
+
     def on_train_epoch_start(self) -> None:
         """Reset aggregated per-task training metrics for the new epoch."""
         self._reset_per_task_metric_state("train")
@@ -257,6 +300,22 @@ class MoMLCAModel(LightningModule):
             "Head outputs must be either tensors or mappings with a tensor-valued "
             "'predictions' entry."
         )
+
+    def _batch_text_field(self, batch: Batch, field_name: str, size: int) -> list[str]:
+        field_value = getattr(batch, field_name, None)
+        if isinstance(field_value, Sequence) and not isinstance(field_value, (str, bytes)):
+            values = [str(value) for value in field_value]
+        elif field_value is None:
+            values = ["" for _ in range(size)]
+        else:
+            values = [str(field_value) for _ in range(size)]
+
+        if len(values) != size:
+            raise ValueError(
+                f"Batch metadata field '{field_name}' must contain {size} entries, "
+                f"got {len(values)}"
+            )
+        return values
 
     def _resolve_head_inputs(self, head_name: str, backbone_outputs: Any) -> Any:
         if isinstance(backbone_outputs, Mapping):

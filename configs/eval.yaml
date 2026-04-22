@@ -2,8 +2,8 @@
 
 defaults:
   - _self_
-  - data: mnist # choose datamodule with `test_dataloader()` for evaluation
-  - model: mnist
+  - data: pfasbench_scaffold # choose datamodule with `test_dataloader()` for evaluation
+  - model: momlca
   - logger: null
   - trainer: default
   - paths: default
@@ -16,3 +16,11 @@ tags: ["dev"]
 
 # passing checkpoint path is necessary for evaluation
 ckpt_path: ???
+
+# Optional prediction export after the canonical `trainer.test(...)` metric pass.
+export_predictions: false
+prediction_split: test
+prediction_export_dir: ${paths.output_dir}/predictions
+log_prediction_artifact: false
+prediction_artifact_name: eval-predictions
+prediction_table_rows: 25
