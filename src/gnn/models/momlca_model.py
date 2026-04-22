@@ -337,7 +337,9 @@ class MoMLCAModel(LightningModule):
         self._validate_head_input_dimensions(normalized_heads)
         return normalized_heads
 
-    def _validate_head_input_dimensions(self, heads: Mapping[str, nn.Module]) -> None:
+    def _validate_head_input_dimensions(
+        self, heads: Mapping[str, nn.Module] | nn.ModuleDict
+    ) -> None:
         """Fail fast when explicit head input width cannot consume backbone outputs."""
         expected_input_dim = self.backbone.output_dim
         for head_name, head in heads.items():
