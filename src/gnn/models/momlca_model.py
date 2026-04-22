@@ -514,6 +514,8 @@ class MoMLCAModel(LightningModule):
 
     def _reset_per_task_metric_state(self, stage: str) -> None:
         self._per_task_metric_state[stage] = None
+        if stage in self._regression_metric_state:
+            self._regression_metric_state[stage] = None
 
     def _update_per_task_metric_state(
         self,
@@ -612,8 +614,8 @@ class MoMLCAModel(LightningModule):
             return
 
         property_names = cast(list[str], state["property_names"])
-        predictions = torch.cat(cast(list[torch.Tensor], state["predictions"]), dim=0).numpy()
-        targets = torch.cat(cast(list[torch.Tensor], state["targets"]), dim=0).numpy()
+        predictions = torch.cat(cast(list[torch.Tensor], state["predictions"]), dim=0)
+        targets = torch.cat(cast(list[torch.Tensor], state["targets"]), dim=0)
         regression_metrics = compute_regression_metrics(
             targets,
             predictions,

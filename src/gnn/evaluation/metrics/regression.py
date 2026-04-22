@@ -95,7 +95,11 @@ def compute_regression_metrics(
 
 def _to_numpy_array(values: np.ndarray | torch.Tensor) -> np.ndarray:
     if isinstance(values, torch.Tensor):
-        return values.detach().cpu().numpy().astype(float, copy=False)
+        tensor = values.detach().cpu()
+        # NumPy does not support torch.bfloat16 directly; normalize first.
+        if tensor.dtype == torch.bfloat16:
+            tensor = tensor.to(dtype=torch.float32)
+        return np.asarray(tensor.numpy(), dtype=float)
     return np.asarray(values, dtype=float)
 
 

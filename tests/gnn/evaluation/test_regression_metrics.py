@@ -57,6 +57,18 @@ def test_compute_regression_metrics_tensor_numpy_parity() -> None:
             assert np.isclose(np_value, torch_value, rtol=1e-6, atol=1e-8)
 
 
+def test_compute_regression_metrics_accepts_bfloat16_tensors() -> None:
+    """bfloat16 tensors should be converted safely via the shared helper."""
+    y_true = torch.tensor([[1.0], [2.0], [3.0]], dtype=torch.bfloat16)
+    y_pred = torch.tensor([[1.0], [2.5], [2.0]], dtype=torch.bfloat16)
+
+    metrics = compute_regression_metrics(y_true, y_pred, ["prop"])
+
+    assert "mae_prop" in metrics
+    assert np.isclose(metrics["mae_prop"], 0.5)
+    assert np.isfinite(metrics["rmse_prop"])
+
+
 def test_compute_regression_metrics_omits_nan_pairs_by_default() -> None:
     """Default NaN behavior should mask invalid rows per property."""
     y_true = np.array([[1.0, 2.0], [np.nan, 4.0], [3.0, np.nan]])
