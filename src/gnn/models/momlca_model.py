@@ -13,6 +13,7 @@ from lightning import LightningModule
 from torch import nn
 from torch_geometric.data import Batch
 
+from gnn.evaluation.metrics import compute_regression_metrics
 from gnn.models.backbones.base import BackboneOutput, BaseBackbone
 from gnn.models.heads import PropertyHead
 
@@ -107,6 +108,10 @@ class MoMLCAModel(LightningModule):
         self._pretrained_backbone_loaded = False
         self._per_task_metric_state: dict[str, dict[str, Any] | None] = {
             "train": None,
+            "val": None,
+            "test": None,
+        }
+        self._regression_metric_state: dict[str, dict[str, Any] | None] = {
             "val": None,
             "test": None,
         }
@@ -209,6 +214,7 @@ class MoMLCAModel(LightningModule):
         loss = self._compute_masked_loss(predictions, batch.y)
         mae = self._compute_masked_mae(predictions, batch.y)
         self._update_per_task_metric_state(stage, predictions, batch.y)
+        self._update_regression_metric_state(stage, predictions, batch.y)
 
         metrics = {"loss": loss, "mae": mae}
         for metric_name, metric_value in metrics.items():
@@ -331,7 +337,9 @@ class MoMLCAModel(LightningModule):
         self._validate_head_input_dimensions(normalized_heads)
         return normalized_heads
 
-    def _validate_head_input_dimensions(self, heads: Mapping[str, nn.Module]) -> None:
+    def _validate_head_input_dimensions(
+        self, heads: Mapping[str, nn.Module] | nn.ModuleDict
+    ) -> None:
         """Fail fast when explicit head input width cannot consume backbone outputs."""
         expected_input_dim = self.backbone.output_dim
         for head_name, head in heads.items():
@@ -508,6 +516,8 @@ class MoMLCAModel(LightningModule):
 
     def _reset_per_task_metric_state(self, stage: str) -> None:
         self._per_task_metric_state[stage] = None
+        if stage in self._regression_metric_state:
+            self._regression_metric_state[stage] = None
 
     def _update_per_task_metric_state(
         self,
@@ -538,6 +548,7 @@ class MoMLCAModel(LightningModule):
     def _log_per_task_epoch_metrics(self, stage: str) -> None:
         state = self._per_task_metric_state.get(stage)
         if state is None:
+            self._log_regression_epoch_metrics(stage)
             return
 
         property_names = cast(list[str], state["property_names"])
@@ -563,6 +574,70 @@ class MoMLCAModel(LightningModule):
             )
 
         self._per_task_metric_state[stage] = None
+        self._log_regression_epoch_metrics(stage)
+
+    def _update_regression_metric_state(
+        self,
+        stage: str,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> None:
+        if stage not in self._regression_metric_state:
+            return
+
+        predictions_matrix, targets_matrix = self._ensure_target_matrix(predictions, targets)
+        property_names = self._resolve_property_names(num_targets=targets_matrix.shape[-1])
+
+        predictions_cpu = predictions_matrix.detach().cpu()
+        targets_cpu = targets_matrix.detach().cpu()
+        state = self._regression_metric_state[stage]
+        if state is None:
+            self._regression_metric_state[stage] = {
+                "property_names": property_names,
+                "predictions": [predictions_cpu],
+                "targets": [targets_cpu],
+            }
+            return
+
+        if cast(list[str], state["property_names"]) != property_names:
+            raise ValueError(
+                "Regression metric state requires stable property names within an epoch"
+            )
+
+        cast(list[torch.Tensor], state["predictions"]).append(predictions_cpu)
+        cast(list[torch.Tensor], state["targets"]).append(targets_cpu)
+
+    def _log_regression_epoch_metrics(self, stage: str) -> None:
+        if stage not in self._regression_metric_state:
+            return
+
+        state = self._regression_metric_state[stage]
+        if state is None:
+            return
+
+        property_names = cast(list[str], state["property_names"])
+        predictions = torch.cat(cast(list[torch.Tensor], state["predictions"]), dim=0)
+        targets = torch.cat(cast(list[torch.Tensor], state["targets"]), dim=0)
+        regression_metrics = compute_regression_metrics(
+            targets,
+            predictions,
+            property_names=property_names,
+        )
+        for metric_name, metric_value in regression_metrics.items():
+            if metric_name.startswith("mae_") and metric_name != "mae_mean":
+                continue
+            if metric_name.startswith("rmse_") and metric_name != "rmse_mean":
+                continue
+            if not torch.isfinite(torch.tensor(metric_value)):
+                continue
+            self.log(
+                f"{stage}/{metric_name}",
+                metric_value,
+                on_step=False,
+                on_epoch=True,
+            )
+
+        self._regression_metric_state[stage] = None
 
     def _masked_reduce(
         self,

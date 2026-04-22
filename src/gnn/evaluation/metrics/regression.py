@@ -4,20 +4,36 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from typing import cast
+from typing import Literal, cast
 
 import numpy as np
+import torch
 from scipy.stats import pearsonr, spearmanr
+
+NaNPolicy = Literal["omit", "raise"]
 
 
 def compute_regression_metrics(
-    y_true: np.ndarray,
-    y_pred: np.ndarray,
+    y_true: np.ndarray | torch.Tensor,
+    y_pred: np.ndarray | torch.Tensor,
     property_names: list[str] | None = None,
+    *,
+    nan_policy: NaNPolicy = "omit",
 ) -> dict[str, float]:
-    """Compute regression metrics per property and across-property means."""
-    true_values = np.asarray(y_true, dtype=float)
-    pred_values = np.asarray(y_pred, dtype=float)
+    """Compute regression metrics per property and across-property means.
+
+    Args:
+        y_true: Target values as a NumPy array or torch tensor.
+        y_pred: Predicted values as a NumPy array or torch tensor.
+        property_names: Optional names for each regression target.
+        nan_policy: ``"omit"`` to mask NaN pairs per property (default) or
+            ``"raise"`` to fail if NaNs are present in either input.
+    """
+    if nan_policy not in {"omit", "raise"}:
+        raise ValueError(f"Unsupported nan_policy={nan_policy!r}; expected 'omit' or 'raise'.")
+
+    true_values = _to_numpy_array(y_true)
+    pred_values = _to_numpy_array(y_pred)
 
     if true_values.ndim == 1:
         true_values = true_values.reshape(-1, 1)
@@ -35,14 +51,21 @@ def compute_regression_metrics(
     if len(property_labels) != num_properties:
         raise ValueError("property_names must match the number of target columns")
 
+    if nan_policy == "raise" and (np.isnan(true_values).any() or np.isnan(pred_values).any()):
+        raise ValueError(
+            "NaN values detected in y_true or y_pred while nan_policy='raise'. "
+            "Use nan_policy='omit' to ignore NaN pairs."
+        )
+
     metrics: dict[str, float] = {}
 
     for index, property_name in enumerate(property_labels):
         targets = true_values[:, index]
         predictions = pred_values[:, index]
-        valid_mask = ~np.isnan(targets) & ~np.isnan(predictions)
-        targets = targets[valid_mask]
-        predictions = predictions[valid_mask]
+        if nan_policy == "omit":
+            valid_mask = ~np.isnan(targets) & ~np.isnan(predictions)
+            targets = targets[valid_mask]
+            predictions = predictions[valid_mask]
 
         if len(targets) == 0:
             continue
@@ -70,6 +93,16 @@ def compute_regression_metrics(
     return metrics
 
 
+def _to_numpy_array(values: np.ndarray | torch.Tensor) -> np.ndarray:
+    if isinstance(values, torch.Tensor):
+        tensor = values.detach().cpu()
+        # NumPy does not support torch.bfloat16 directly; normalize first.
+        if tensor.dtype == torch.bfloat16:
+            tensor = tensor.to(dtype=torch.float32)
+        return np.asarray(tensor.numpy(), dtype=float)
+    return np.asarray(values, dtype=float)
+
+
 def _safe_correlation(
     correlation_fn: Callable[[np.ndarray, np.ndarray], object],
     x: np.ndarray,
@@ -84,4 +117,4 @@ def _safe_correlation(
     return float(result[0])
 
 
-__all__ = ["compute_regression_metrics"]
+__all__ = ["NaNPolicy", "compute_regression_metrics"]

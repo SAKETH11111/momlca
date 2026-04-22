@@ -299,13 +299,20 @@ def test_step_methods_mask_nan_targets_and_log_regression_metrics() -> None:
         ],
         dtype=torch.float32,
     )
-    logged: list[str] = []
+    logged: dict[str, torch.Tensor | float] = {}
     model = MoMLCAModel(
         backbone=RecordingBackbone(),
         heads={"property": StaticHead(predictions)},
         property_names=["logS", "logP", "pKa"],
     )
-    model.log = lambda name, value, **_: logged.append(name)  # type: ignore[method-assign]
+
+    def _record_metric(name: str, value: torch.Tensor | float, **_: object) -> None:
+        if isinstance(value, torch.Tensor):
+            logged[name] = value.detach().clone()
+            return
+        logged[name] = value
+
+    model.log = _record_metric  # type: ignore[method-assign]
 
     model.on_train_epoch_start()
     train_loss = model.training_step(batch, batch_idx=0)
@@ -322,7 +329,8 @@ def test_step_methods_mask_nan_targets_and_log_regression_metrics() -> None:
 
     assert torch.isclose(train_loss.detach(), expected_loss)
     assert torch.isclose(model._compute_masked_mae(predictions, batch.y).detach(), expected_mae)
-    assert set(logged) == {
+    logged_keys = set(logged)
+    assert {
         "train/loss",
         "train/mae",
         "train/mae_logP",
@@ -347,7 +355,31 @@ def test_step_methods_mask_nan_targets_and_log_regression_metrics() -> None:
         "test/rmse_logP",
         "test/rmse_logS",
         "test/rmse_pKa",
-    }
+    }.issubset(logged_keys)
+    assert "train/r2_mean" not in logged_keys
+
+    for stage in ("val", "test"):
+        assert f"{stage}/mae_mean" in logged_keys
+        assert f"{stage}/rmse_mean" in logged_keys
+        assert f"{stage}/r2_mean" in logged_keys
+        assert f"{stage}/pearson_mean" in logged_keys
+        assert f"{stage}/spearman_mean" in logged_keys
+        assert f"{stage}/r2_logS" in logged_keys
+        assert f"{stage}/r2_logP" in logged_keys
+        assert f"{stage}/r2_pKa" in logged_keys
+        assert f"{stage}/pearson_logS" in logged_keys
+        assert f"{stage}/spearman_logS" in logged_keys
+        assert torch.isclose(
+            torch.as_tensor(logged[f"{stage}/r2_logS"]), torch.tensor(-1.5), atol=1e-6
+        )
+        assert torch.isclose(
+            torch.as_tensor(logged[f"{stage}/r2_mean"]), torch.tensor(-0.5), atol=1e-6
+        )
+        assert not torch.isclose(
+            torch.as_tensor(logged[f"{stage}/r2_logS"]),
+            torch.as_tensor(logged[f"{stage}/r2_mean"]),
+            atol=1e-6,
+        )
 
 
 def test_configure_optimizers_defaults_to_adamw_and_plateau_monitor() -> None:
@@ -747,6 +779,21 @@ def test_per_task_epoch_metrics_use_valid_label_counts_and_skip_unlabeled_tasks(
     assert "train/mae_logP" not in logged
     assert "train/rmse_logP" not in logged
     assert model._per_task_metric_state["train"] is None
+
+
+def test_validation_epoch_start_clears_regression_metric_state() -> None:
+    """Validation/test regression state should reset at epoch start."""
+    model = MoMLCAModel(property_names=["logS", "logP", "pKa"])
+
+    model._update_regression_metric_state(
+        "val",
+        predictions=torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32),
+        targets=torch.tensor([[1.5, 2.5, 3.5]], dtype=torch.float32),
+    )
+    assert model._regression_metric_state["val"] is not None
+
+    model.on_validation_epoch_start()
+    assert model._regression_metric_state["val"] is None
 
 
 def test_single_target_regression_uses_generic_metric_names_when_defaults_do_not_fit() -> None:
