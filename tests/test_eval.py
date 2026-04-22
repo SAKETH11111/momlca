@@ -13,6 +13,7 @@ from omegaconf import DictConfig, open_dict
 
 from src.eval import (
     _disable_pretrained_backbone_for_resume,
+    _predict_kwargs_for_export,
     _supports_prediction_collection,
     evaluate,
 )
@@ -75,6 +76,48 @@ def test_supports_prediction_collection_blocks_spawn_and_fork_strategies() -> No
     assert _supports_prediction_collection(spawn_trainer) is False
     assert _supports_prediction_collection(fork_trainer) is False
     assert _supports_prediction_collection(ddp_trainer) is True
+
+
+def test_predict_kwargs_for_export_enables_weights_only_and_return_predictions() -> None:
+    """Prediction export should force full checkpoint loading and prediction collection."""
+
+    class _Trainer:
+        strategy = SimpleNamespace(strategy_name="ddp", launcher=None)
+
+        def predict(
+            self,
+            *,
+            model: object | None = None,
+            datamodule: object | None = None,
+            return_predictions: bool | None = None,
+            ckpt_path: str | None = None,
+            weights_only: bool | None = None,
+        ) -> list[dict[str, object]]:
+            return []
+
+    predict_kwargs = _predict_kwargs_for_export(_Trainer())
+    assert predict_kwargs == {"weights_only": False, "return_predictions": True}
+
+
+def test_predict_kwargs_for_export_rejects_spawn_and_fork_strategies() -> None:
+    """Prediction export should fail fast on unsupported distributed strategies."""
+
+    class _Trainer:
+        strategy = SimpleNamespace(strategy_name="ddp_spawn", launcher=SimpleNamespace())
+
+        def predict(
+            self,
+            *,
+            model: object | None = None,
+            datamodule: object | None = None,
+            return_predictions: bool | None = None,
+            ckpt_path: str | None = None,
+            weights_only: bool | None = None,
+        ) -> list[dict[str, object]]:
+            return []
+
+    with pytest.raises(RuntimeError, match="does not support prediction collection"):
+        _predict_kwargs_for_export(_Trainer())
 
 
 @pytest.mark.slow

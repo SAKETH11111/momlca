@@ -48,6 +48,10 @@ def _supports_kwarg(callable_obj: object, parameter_name: str) -> bool:
     return parameter_name in inspect.signature(callable_obj).parameters
 
 
+def _supports_weights_only(callable_obj: object) -> bool:
+    return _supports_kwarg(callable_obj, "weights_only")
+
+
 def _supports_prediction_collection(trainer: Trainer) -> bool:
     strategy = getattr(trainer, "strategy", None)
     if strategy is None:
@@ -62,6 +66,27 @@ def _supports_prediction_collection(trainer: Trainer) -> bool:
         any(token in strategy_name for token in disallowed_tokens)
         or any(token in launcher_name for token in disallowed_tokens)
     )
+
+
+def _strategy_name(trainer: Trainer) -> str:
+    return str(getattr(getattr(trainer, "strategy", None), "strategy_name", "unknown"))
+
+
+def _predict_kwargs_for_export(trainer: Trainer) -> dict[str, Any]:
+    predict_kwargs: dict[str, Any] = {}
+    if _supports_weights_only(trainer.predict):
+        # Keep Lightning checkpoint loading behavior compatible with train/test paths.
+        predict_kwargs["weights_only"] = False
+
+    if _supports_kwarg(trainer.predict, "return_predictions"):
+        if not _supports_prediction_collection(trainer):
+            raise RuntimeError(
+                "Prediction export requires return_predictions=True, but strategy "
+                f"'{_strategy_name(trainer)}' does not support prediction collection. "
+                "Use a non-spawn/fork strategy or disable export_predictions."
+            )
+        predict_kwargs["return_predictions"] = True
+    return predict_kwargs
 
 
 def _disable_pretrained_backbone_for_resume(cfg: DictConfig) -> str | None:
@@ -175,7 +200,10 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
         log_hyperparameters(object_dict)
 
     log.info("Starting testing!")
-    trainer.test(model=model, datamodule=datamodule, ckpt_path=cfg.ckpt_path)
+    test_kwargs: dict[str, Any] = {}
+    if _supports_weights_only(trainer.test):
+        test_kwargs["weights_only"] = False
+    trainer.test(model=model, datamodule=datamodule, ckpt_path=cfg.ckpt_path, **test_kwargs)
 
     # for predictions use trainer.predict(...)
     # predictions = trainer.predict(model=model, dataloaders=dataloaders, ckpt_path=cfg.ckpt_path)
@@ -197,21 +225,7 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
                 "Evaluation prediction export currently supports only prediction_split='test'"
             )
 
-        predict_kwargs: dict[str, Any] = {}
-        if _supports_kwarg(
-            trainer.predict, "return_predictions"
-        ) and _supports_prediction_collection(trainer):
-            predict_kwargs["return_predictions"] = True
-        elif _supports_kwarg(trainer.predict, "return_predictions"):
-            strategy_name = str(
-                getattr(getattr(trainer, "strategy", None), "strategy_name", "unknown")
-            )
-            log.warning(
-                "Prediction export requested with distributed strategy '%s' that does not "
-                "support return_predictions=True. Continuing without forcing prediction "
-                "collection; export may contain zero records.",
-                strategy_name,
-            )
+        predict_kwargs = _predict_kwargs_for_export(trainer)
 
         log.info("Collecting test predictions for export...")
         raw_predictions = trainer.predict(
@@ -220,6 +234,12 @@ def evaluate(cfg: DictConfig) -> tuple[dict[str, Any], dict[str, Any]]:
             ckpt_path=cfg.ckpt_path,
             **predict_kwargs,
         )
+        if raw_predictions is None:
+            raise RuntimeError(
+                "Prediction export expected collected prediction outputs but received None. "
+                "This usually indicates return_predictions was disabled by the current "
+                "strategy/runtime. Disable export_predictions or use a supported strategy."
+            )
         prediction_batches = _flatten_prediction_outputs(raw_predictions)
 
         property_names = getattr(model, "property_names", None)
