@@ -322,7 +322,8 @@ def test_step_methods_mask_nan_targets_and_log_regression_metrics() -> None:
 
     assert torch.isclose(train_loss.detach(), expected_loss)
     assert torch.isclose(model._compute_masked_mae(predictions, batch.y).detach(), expected_mae)
-    assert set(logged) == {
+    logged_keys = set(logged)
+    assert {
         "train/loss",
         "train/mae",
         "train/mae_logP",
@@ -347,7 +348,20 @@ def test_step_methods_mask_nan_targets_and_log_regression_metrics() -> None:
         "test/rmse_logP",
         "test/rmse_logS",
         "test/rmse_pKa",
-    }
+    }.issubset(logged_keys)
+    assert "train/r2_mean" not in logged_keys
+
+    for stage in ("val", "test"):
+        assert f"{stage}/mae_mean" in logged_keys
+        assert f"{stage}/rmse_mean" in logged_keys
+        assert f"{stage}/r2_mean" in logged_keys
+        assert f"{stage}/pearson_mean" in logged_keys
+        assert f"{stage}/spearman_mean" in logged_keys
+        assert f"{stage}/r2_logS" in logged_keys
+        assert f"{stage}/r2_logP" in logged_keys
+        assert f"{stage}/r2_pKa" in logged_keys
+        assert f"{stage}/pearson_logS" in logged_keys
+        assert f"{stage}/spearman_logS" in logged_keys
 
 
 def test_configure_optimizers_defaults_to_adamw_and_plateau_monitor() -> None:
