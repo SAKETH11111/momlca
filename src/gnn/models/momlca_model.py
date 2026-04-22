@@ -328,7 +328,32 @@ class MoMLCAModel(LightningModule):
                 output_dim=len(self.property_names),
             )
 
+        self._validate_head_input_dimensions(normalized_heads)
         return normalized_heads
+
+    def _validate_head_input_dimensions(self, heads: Mapping[str, nn.Module]) -> None:
+        """Fail fast when explicit head input width cannot consume backbone outputs."""
+        expected_input_dim = self.backbone.output_dim
+        for head_name, head in heads.items():
+            head_input_dim = self._resolve_head_input_dim(head)
+            if head_input_dim is None:
+                continue
+            if head_input_dim != expected_input_dim:
+                raise ValueError(
+                    f"Head '{head_name}' expects input dimension {head_input_dim}, but "
+                    f"backbone.output_dim is {expected_input_dim}. Update "
+                    f"model.heads.{head_name}.input_dim (or in_features) to "
+                    f"{expected_input_dim}, or set heads=null to auto-create a compatible "
+                    "PropertyHead."
+                )
+
+    def _resolve_head_input_dim(self, head: nn.Module) -> int | None:
+        """Best-effort extraction of a head module input width for compatibility checks."""
+        for attribute_name in ("input_dim", "in_features"):
+            attribute_value = getattr(head, attribute_name, None)
+            if isinstance(attribute_value, int):
+                return attribute_value
+        return None
 
     def _normalize_pretrained_backbone_config(
         self, pretrained_backbone: Mapping[str, Any] | None
