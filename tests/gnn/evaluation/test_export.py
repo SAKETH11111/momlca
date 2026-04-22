@@ -129,3 +129,39 @@ def test_build_prediction_records_computes_residuals_from_raw_values() -> None:
     assert records[0]["predictions"]["logS"] == 1.234567
     assert records[0]["targets"]["logS"] == 1.234567
     assert records[0]["residuals"]["logS"] == 0.000001
+
+
+def test_export_prediction_records_avoids_same_stem_collisions(tmp_path: Path) -> None:
+    """Different checkpoint paths with same stem should not overwrite each other."""
+    records = [
+        {
+            "split": "test",
+            "checkpoint_path": "",
+            "smiles": "C",
+            "name": "Methane",
+            "inchikey": "VNWKTOKETHGBQD-UHFFFAOYSA-N",
+            "targets": {"logS": 0.1},
+            "predictions": {"logS": 0.2},
+            "residuals": {"logS": 0.1},
+        }
+    ]
+
+    path_a = export_prediction_records(
+        records=records,
+        output_dir=tmp_path,
+        split_name="test",
+        checkpoint_path="/tmp/run-a/best.ckpt",
+        property_names=["logS"],
+    )
+    path_b = export_prediction_records(
+        records=records,
+        output_dir=tmp_path,
+        split_name="test",
+        checkpoint_path="/tmp/run-b/best.ckpt",
+        property_names=["logS"],
+    )
+
+    assert path_a.exists()
+    assert path_b.exists()
+    assert path_a != path_b
+    assert path_a.name != path_b.name

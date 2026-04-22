@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from gnn.baselines.random_forest import save_rf_model, train_rf_baseline
@@ -264,6 +265,27 @@ class TestModelComparison:
         assert result.metadata["n_estimators"] == 100
         assert result.metadata["max_depth"] == 5
 
+    def test_to_dataframe_includes_scalar_metadata_columns(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+        targets = np.array([[1.0], [2.0]])
+        comparison.add_result(
+            "Model1",
+            targets,
+            targets,
+            metadata={
+                "model_type": "gnn",
+                "checkpoint_path": "/tmp/checkpoints/best.ckpt",
+                "checkpoint_id": "best-abc12345",
+                "non_scalar": {"skip": True},
+            },
+        )
+
+        frame = comparison.to_dataframe()
+        assert "checkpoint_path" in frame.columns
+        assert "checkpoint_id" in frame.columns
+        assert "non_scalar" not in frame.columns
+        assert frame.loc["Model1", "checkpoint_id"] == "best-abc12345"
+
     def test_evaluate_all_splits(self) -> None:
         comparison = ModelComparison(property_names=["prop1"])
 
@@ -358,6 +380,33 @@ class TestModelComparison:
         assert "Per-Split Rankings" in content
         assert "Best Model Per Target" in content
         assert "Statistical Significance Notes" in content
+
+    def test_save_report_renders_significance_results_table(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+        comparison.add_result("A", np.array([[1.0], [2.0]]), np.array([[1.0], [2.0]]))
+        comparison.add_result("B", np.array([[1.2], [2.4]]), np.array([[1.0], [2.0]]))
+        significance = pd.DataFrame(
+            [
+                {
+                    "model_a": "A",
+                    "model_b": "B",
+                    "property": "prop1",
+                    "metric_proxy": "absolute_error",
+                    "sample_count": 2,
+                    "test_name": "wilcoxon",
+                    "p_value": 0.03,
+                    "winning_direction": "A lower absolute_error",
+                }
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "comparison.md"
+            comparison.save_report(path, significance=significance)
+            content = path.read_text()
+
+        assert "Statistical Significance Results" in content
+        assert "wilcoxon" in content
 
 
 class TestCompareBaselinesCliHelpers:
