@@ -236,6 +236,16 @@ def test_model_uses_property_head_by_default() -> None:
     assert outputs["predictions"]["property"].shape == (2, 3)
 
 
+def test_model_rejects_explicit_head_input_dim_mismatch() -> None:
+    """Explicit head configs should fail fast when backbone/head widths are incompatible."""
+    with pytest.raises(ValueError, match="Head 'property' expects input dimension 3"):
+        MoMLCAModel(
+            backbone=RecordingBackbone(),
+            heads={"property": nn.Linear(3, 3)},
+            property_names=["logS", "logP", "pKa"],
+        )
+
+
 def test_model_accepts_property_head_mapping_outputs_with_prediction_tensor() -> None:
     """Property heads may return mappings as long as they expose tensor predictions."""
     batch = make_batch()
