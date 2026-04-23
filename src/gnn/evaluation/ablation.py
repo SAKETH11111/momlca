@@ -35,7 +35,7 @@ class AlignedPredictionData:
 
     split_name: str
     property_names: list[str]
-    sample_keys: list[tuple[str, str, str]]
+    sample_keys: list[tuple[str, str]]
     y_true: np.ndarray
     predictions_by_model: dict[str, np.ndarray]
     checkpoint_paths: dict[str, str]
@@ -272,8 +272,8 @@ def run_ablation_comparison(
 def _record_map_for_export(
     export: PredictionExport,
     property_names: list[str],
-) -> dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]]:
-    record_map: dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]] = {}
+) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
+    record_map: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
     for record in export.records:
         record_split = str(record.get("split", ""))
         if record_split != export.split_name:
@@ -319,13 +319,12 @@ def _values_for_properties(
     return values
 
 
-def _record_key(record: dict[str, Any]) -> tuple[str, str, str]:
+def _record_key(record: dict[str, Any]) -> tuple[str, str]:
     inchikey = str(record.get("inchikey") or "").strip()
     smiles = str(record.get("smiles") or "").strip()
-    name = str(record.get("name") or "").strip()
     if inchikey == "" and smiles == "":
         raise ValueError("Record alignment requires at least inchikey or smiles")
-    return (inchikey, smiles, name)
+    return (inchikey, smiles)
 
 
 def _coerce_float(value: Any) -> float:

@@ -41,9 +41,6 @@ def run_paired_significance_test(
     first = np.asarray(first_errors[mask], dtype=float)
     second = np.asarray(second_errors[mask], dtype=float)
     sample_count = int(first.shape[0])
-    if sample_count == 0:
-        raise ValueError("Paired significance requires at least one aligned finite sample")
-
     if sample_count < 2:
         return PairedSignificanceResult(
             sample_count=sample_count,

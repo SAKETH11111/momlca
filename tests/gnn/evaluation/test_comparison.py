@@ -286,6 +286,27 @@ class TestModelComparison:
         assert "non_scalar" not in frame.columns
         assert frame.loc["Model1", "checkpoint_id"] == "best-abc12345"
 
+    def test_to_dataframe_drops_non_scalar_values_from_scalar_metadata_columns(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+        targets = np.array([[1.0], [2.0]])
+        comparison.add_result(
+            "ScalarModel",
+            targets,
+            targets,
+            metadata={"checkpoint_id": "abc123", "model_type": "gnn"},
+        )
+        comparison.add_result(
+            "MixedModel",
+            targets,
+            targets,
+            metadata={"checkpoint_id": {"nested": True}, "model_type": "gnn"},
+        )
+
+        frame = comparison.to_dataframe()
+        assert "checkpoint_id" in frame.columns
+        assert frame.loc["ScalarModel", "checkpoint_id"] == "abc123"
+        assert pd.isna(frame.loc["MixedModel", "checkpoint_id"])
+
     def test_evaluate_all_splits(self) -> None:
         comparison = ModelComparison(property_names=["prop1"])
 

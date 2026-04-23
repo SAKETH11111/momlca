@@ -146,6 +146,8 @@ def _parse_named_paths(entries: list[str], *, label: str) -> dict[str, Path]:
         name, separator, path_value = entry.partition("=")
         if not separator or not name or not path_value:
             raise ValueError(f"Invalid {label} entry {entry!r}; expected 'name=/path/to/file.json'")
+        if name in parsed:
+            raise ValueError(f"{label.title()} names must be unique; duplicate entry for {name!r}")
         path = Path(path_value).expanduser()
         if not path.exists():
             raise FileNotFoundError(f"{label.title()} file does not exist: {path}")

@@ -152,6 +152,67 @@ def test_align_prediction_exports_fails_on_missing_rows(tmp_path: Path) -> None:
         )
 
 
+def test_align_prediction_exports_uses_stable_identifiers_not_display_name(tmp_path: Path) -> None:
+    records_a = _sample_records(log_s_predictions=(1.0, 2.1))
+    records_b = _sample_records(log_s_predictions=(1.2, 2.3))
+    records_b[0]["name"] = "ethanol (renamed)"
+    records_b[1]["name"] = "ethylamine (renamed)"
+
+    export_a = _write_export(
+        tmp_path / "a.json",
+        split="test",
+        checkpoint_path="/tmp/models/a.ckpt",
+        property_names=["logS", "logP"],
+        records=records_a,
+    )
+    export_b = _write_export(
+        tmp_path / "b.json",
+        split="test",
+        checkpoint_path="/tmp/models/b.ckpt",
+        property_names=["logS", "logP"],
+        records=records_b,
+    )
+
+    aligned = align_prediction_exports(
+        {
+            "A": load_prediction_export(export_a, model_name="A"),
+            "B": load_prediction_export(export_b, model_name="B"),
+        }
+    )
+
+    assert len(aligned.sample_keys) == 2
+    assert all(len(key) == 2 for key in aligned.sample_keys)
+
+
+def test_align_prediction_exports_fails_on_duplicate_identifiers_with_different_names(
+    tmp_path: Path,
+) -> None:
+    duplicate_records = _sample_records(log_s_predictions=(1.0, 2.1))
+    duplicate_records.append(
+        {
+            "split": "test",
+            "checkpoint_path": "/tmp/checkpoints/a.ckpt",
+            "smiles": "CCO",
+            "name": "ethanol duplicate label",
+            "inchikey": "LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+            "targets": {"logS": 1.0, "logP": 2.0},
+            "predictions": {"logS": 1.0, "logP": 2.1},
+            "residuals": {"logS": 0.0, "logP": 0.1},
+        }
+    )
+    export_path = _write_export(
+        tmp_path / "dup.json",
+        split="test",
+        checkpoint_path="/tmp/models/a.ckpt",
+        property_names=["logS", "logP"],
+        records=duplicate_records,
+    )
+    export = load_prediction_export(export_path, model_name="A")
+
+    with pytest.raises(ValueError, match="Duplicate sample key"):
+        align_prediction_exports({"A": export, "B": export})
+
+
 def test_build_pairwise_significance_table_reports_winner_direction() -> None:
     y_true = np.array([[1.0], [2.0], [3.0], [4.0]], dtype=float)
     predictions_by_model = {
@@ -210,6 +271,21 @@ def test_run_paired_significance_test_ttest_rel_identical_arrays_returns_non_sig
 
 
 @pytest.mark.parametrize("test_name", ["ttest_rel", "wilcoxon"])
+def test_run_paired_significance_test_zero_samples_returns_insufficient_result(
+    test_name: str,
+) -> None:
+    first_errors = np.array([np.nan, np.nan], dtype=float)
+    second_errors = np.array([np.nan, np.nan], dtype=float)
+
+    result = run_paired_significance_test(first_errors, second_errors, test_name=test_name)
+
+    assert result.sample_count == 0
+    assert result.test_name == f"{test_name}(insufficient_samples)"
+    assert np.isnan(result.statistic)
+    assert np.isnan(result.p_value)
+
+
+@pytest.mark.parametrize("test_name", ["ttest_rel", "wilcoxon"])
 def test_run_paired_significance_test_near_equal_arrays_do_not_short_circuit(
     test_name: str,
 ) -> None:
@@ -223,6 +299,26 @@ def test_run_paired_significance_test_near_equal_arrays_do_not_short_circuit(
     assert result.sample_count == 4
     assert result.test_name == test_name
     assert (result.statistic, result.p_value) != (0.0, 1.0)
+
+
+def test_build_pairwise_significance_table_handles_fully_masked_columns() -> None:
+    y_true = np.array([[np.nan], [np.nan]], dtype=float)
+    predictions_by_model = {
+        "A": np.array([[1.0], [2.0]], dtype=float),
+        "B": np.array([[1.5], [2.5]], dtype=float),
+    }
+
+    significance = build_pairwise_significance_table(
+        y_true=y_true,
+        predictions_by_model=predictions_by_model,
+        property_names=["logS"],
+    )
+
+    assert len(significance) == 1
+    row = significance.iloc[0]
+    assert int(row["sample_count"]) == 0
+    assert row["test_name"] == "wilcoxon(insufficient_samples)"
+    assert np.isnan(float(row["p_value"]))
 
 
 def test_run_ablation_comparison_writes_csv_and_report_artifacts(tmp_path: Path) -> None:

@@ -181,7 +181,8 @@ class ModelComparison:
                 "model_type": result.metadata.get("model_type", "unknown"),
             }
             for key in metadata_columns:
-                record[key] = result.metadata.get(key)
+                value = result.metadata.get(key)
+                record[key] = value if self._is_scalar_metadata_value(value) else None
             record.update(result.metrics)
             records.append(record)
 
