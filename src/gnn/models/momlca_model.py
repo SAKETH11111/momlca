@@ -324,6 +324,8 @@ class MoMLCAModel(LightningModule):
                 return head_inputs[head_name]
             if head_name in backbone_outputs:
                 return backbone_outputs[head_name]
+            if head_name == "charge" and "node_features" in backbone_outputs:
+                return backbone_outputs["node_features"]
             if "graph_features" in backbone_outputs:
                 return backbone_outputs["graph_features"]
         return backbone_outputs

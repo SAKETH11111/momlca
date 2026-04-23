@@ -9,7 +9,10 @@ from torch import nn
 
 from gnn.utils.registry import HEAD_REGISTRY, ComponentRegistry
 
-_BUILTIN_HEAD_MODULES: tuple[str, ...] = ("gnn.models.heads.property",)
+_BUILTIN_HEAD_MODULES: tuple[str, ...] = (
+    "gnn.models.heads.property",
+    "gnn.models.heads.charge",
+)
 _HEAD_REGISTRY = ComponentRegistry[nn.Module](
     component_type="Head",
     plural_component_type="heads",

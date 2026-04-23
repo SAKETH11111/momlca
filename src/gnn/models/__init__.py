@@ -1,7 +1,9 @@
 """Model building blocks for GNN training."""
 
 from gnn.models.backbones import GINBackbone, PaiNNBackbone, PaiNNStageBackbone
+from gnn.models.constraints import ChargeConservationLayer
 from gnn.models.heads import (
+    ChargeHead,
     PropertyHead,
     get_head,
     get_head_class,
@@ -15,6 +17,8 @@ __all__ = [
     "MoMLCAModel",
     "PaiNNBackbone",
     "PaiNNStageBackbone",
+    "ChargeHead",
+    "ChargeConservationLayer",
     "PropertyHead",
     "get_head",
     "get_head_class",
