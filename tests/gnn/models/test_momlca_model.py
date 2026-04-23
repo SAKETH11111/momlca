@@ -18,6 +18,7 @@ from torch_geometric.data import Batch, Data
 
 from gnn.data.datamodules import PFASBenchDataModule
 from gnn.models import (
+    ChargeHead,
     GINBackbone,
     MoMLCAModel,
     PaiNNBackbone,
@@ -112,6 +113,26 @@ class RecordingHead(nn.Module):
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         self.last_inputs = features
         return self.proj(features)
+
+
+class RecordingNodeHead(nn.Module):
+    """Node-level head test double that records the features it receives."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_dim = 2
+        self.last_inputs: torch.Tensor | None = None
+        self.proj = nn.Linear(2, 1, bias=False)
+        with torch.no_grad():
+            self.proj.weight.copy_(torch.tensor([[1.0, -1.0]], dtype=torch.float32))
+
+    def forward(self, features: torch.Tensor) -> dict[str, torch.Tensor]:
+        self.last_inputs = features
+        predictions = self.proj(features).squeeze(-1)
+        return {
+            "predictions": predictions,
+            "log_variance": torch.zeros_like(predictions),
+        }
 
 
 class StaticHead(nn.Module):
@@ -221,6 +242,30 @@ def test_forward_routes_backbone_outputs_to_named_heads() -> None:
     assert outputs["predictions"]["property"].shape == (batch.num_graphs, 3)
 
 
+def test_forward_routes_charge_heads_to_node_features() -> None:
+    """Charge heads should receive node-level embeddings from the backbone contract."""
+    batch = make_batch()
+    backbone = RecordingBackbone()
+    charge_head = RecordingNodeHead()
+    model = MoMLCAModel(
+        backbone=backbone,
+        heads={
+            "property": RecordingHead(),
+            "charge": charge_head,
+        },
+        property_names=["logS", "logP", "pKa"],
+    )
+
+    outputs = model.forward(batch)
+
+    assert charge_head.last_inputs is not None
+    assert torch.equal(charge_head.last_inputs, outputs["backbone"]["node_features"])
+    charge_outputs = outputs["predictions"]["charge"]
+    assert isinstance(charge_outputs, dict)
+    assert charge_outputs["predictions"].shape == (batch.x.shape[0],)
+    assert charge_outputs["log_variance"].shape == (batch.x.shape[0],)
+
+
 def test_model_uses_property_head_by_default() -> None:
     """The default head path should instantiate the graph-level PropertyHead."""
     model = MoMLCAModel(
@@ -234,6 +279,32 @@ def test_model_uses_property_head_by_default() -> None:
     assert model.heads["property"].input_dim == model.backbone.output_dim
     assert isinstance(outputs["predictions"]["property"], torch.Tensor)
     assert outputs["predictions"]["property"].shape == (2, 3)
+
+
+def test_model_accepts_charge_head_alongside_property_head() -> None:
+    """Charge heads should coexist with property heads in the main forward path."""
+    batch = make_batch()
+    model = MoMLCAModel(
+        backbone=RecordingBackbone(),
+        heads={
+            "property": PropertyHead(
+                input_dim=RecordingBackbone().output_dim,
+                output_dim=3,
+            ),
+            "charge": ChargeHead(
+                input_dim=RecordingBackbone().output_dim,
+                hidden_dims=(4,),
+            ),
+        },
+        property_names=["logS", "logP", "pKa"],
+    )
+
+    outputs = model.forward(batch)
+
+    charge_outputs = outputs["predictions"]["charge"]
+    assert isinstance(charge_outputs, dict)
+    assert charge_outputs["predictions"].shape == (batch.x.shape[0],)
+    assert charge_outputs["log_variance"].shape == (batch.x.shape[0],)
 
 
 def test_model_rejects_explicit_head_input_dim_mismatch() -> None:
