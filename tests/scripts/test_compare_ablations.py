@@ -1,12 +1,40 @@
 """Tests for ablation comparison CLI helpers."""
-
+import json
 from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
 
 from scripts.compare_ablations import _parse_named_paths
+from scripts import compare_ablations
+
+
+def test_load_confidence_intervals_rejects_non_object_payload(tmp_path: Path) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(json.dumps([{"aggregate_stats": {}}]))
+
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        compare_ablations._load_confidence_intervals({"ModelA": summary_path})
+
+
+def test_load_confidence_intervals_accepts_mapping_payload(tmp_path: Path) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "aggregate_stats": {
+                    "mae_mean": {
+                        "n": 3,
+                        "mean": 0.2,
+                        "ci_half_width": 0.01,
+                    }
+                }
+            }
+        )
+    )
+
+    loaded = compare_ablations._load_confidence_intervals({"ModelA": summary_path})
+    assert loaded["ModelA"]["mae_mean"]["n"] == 3
 
 
 def test_parse_named_paths_rejects_duplicate_names(tmp_path: Path) -> None:

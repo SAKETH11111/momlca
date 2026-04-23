@@ -26,17 +26,21 @@ def normalize_interval_summary(
     """Coerce one metric summary into a stable interval-field dictionary."""
     n = _coerce_int(summary.get("n"))
     mean = _coerce_float(summary.get("mean"))
-    std = _coerce_float(summary.get("std"))
-    sem = _coerce_float(summary.get("sem"))
+    std = _coerce_nonnegative_float(summary.get("std"))
+    sem = _coerce_nonnegative_float(summary.get("sem"))
     ci_method = _coerce_method(summary.get("ci_method"))
-    ci_level = _coerce_float(summary.get("ci_level"))
+    ci_level = _coerce_ci_level(summary.get("ci_level"))
     ci_low = _coerce_float(summary.get("ci_low"))
     ci_high = _coerce_float(summary.get("ci_high"))
-    ci_half_width = _coerce_float(summary.get("ci_half_width"))
-    ci95 = _coerce_float(summary.get("ci95"))
+    ci_half_width = _coerce_nonnegative_float(summary.get("ci_half_width"))
+    ci95 = _coerce_nonnegative_float(summary.get("ci95"))
+
+    if ci_low is not None and ci_high is not None and ci_high < ci_low:
+        ci_low = None
+        ci_high = None
 
     if ci_half_width is None and ci_low is not None and ci_high is not None:
-        ci_half_width = (ci_high - ci_low) / 2.0
+        ci_half_width = _coerce_nonnegative_float((ci_high - ci_low) / 2.0)
 
     return {
         "n": n,
@@ -60,12 +64,15 @@ def format_interval_display(summary: Mapping[str, Any], *, precision: int = 4) -
         return None
 
     ci_half_width = normalized["ci_half_width"]
+    ci_source = ""
     if ci_half_width is None:
         ci_half_width = normalized["ci95"]
+        if ci_half_width is not None:
+            ci_source = " (ci95 fallback)"
     if ci_half_width is None:
         return None
 
-    return f"{mean:.{precision}f} +/- {ci_half_width:.{precision}f}"
+    return f"{mean:.{precision}f} +/- {ci_half_width:.{precision}f}{ci_source}"
 
 
 def interval_report_fields(
@@ -121,9 +128,9 @@ def _coerce_int(value: Any) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool):
-        return int(value)
+        return None
     if isinstance(value, int):
-        return value
+        return value if value >= 0 else None
     try:
         as_float = float(value)
     except (TypeError, ValueError):
@@ -133,7 +140,29 @@ def _coerce_int(value: Any) -> int | None:
     as_int = int(as_float)
     if float(as_int) != as_float:
         return None
+    if as_int < 0:
+        return None
     return as_int
+
+
+def _coerce_nonnegative_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    scalar = _coerce_float(value)
+    if scalar is None or scalar < 0.0:
+        return None
+    return scalar
+
+
+def _coerce_ci_level(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    scalar = _coerce_float(value)
+    if scalar is None:
+        return None
+    if scalar <= 0.0 or scalar >= 1.0:
+        return None
+    return scalar
 
 
 def _coerce_method(value: Any) -> str | None:

@@ -590,7 +590,7 @@ def _write_distribution_figure(
                     f'<rect x="{x0:.2f}" y="{y_coord(q3):.2f}" width="{box_width:.2f}" height="{max(1.0, y_coord(q1) - y_coord(q3)):.2f}" fill="#9ecae1" stroke="#1f77b4"/>',
                     f'<line x1="{x0:.2f}" y1="{y_coord(median):.2f}" x2="{x1:.2f}" y2="{y_coord(median):.2f}" stroke="#084594" stroke-width="2"/>',
                 ]
-            )
+        )
         escaped_label = _escape_svg_text(label)
         svg_parts.append(
             f'<text x="{x_center:.2f}" y="{top + plot_height + 18}" text-anchor="middle" font-size="10" font-family="Arial">{escaped_label}</text>'
@@ -655,8 +655,9 @@ def _normalize_metric_values(values: np.ndarray) -> np.ndarray:
 
 def _export_id(source_path: Path) -> str:
     stem = source_path.stem
+    normalized_source = source_path.expanduser().resolve(strict=False)
     digest = hashlib.sha1(
-        str(source_path).encode("utf-8"),
+        normalized_source.as_posix().encode("utf-8"),
         usedforsecurity=False,
     ).hexdigest()[:8]
     return f"{stem}-{digest}"

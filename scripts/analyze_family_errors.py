@@ -149,7 +149,13 @@ def _write_confidence_summary_sidecar(
     output_dir: Path,
     report_path: Path,
 ) -> Path:
-    payload = json.loads(source_path.read_text())
+    try:
+        payload = json.loads(source_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Confidence summary {source_path} is not valid JSON: {exc.msg} "
+            f"(line {exc.lineno}, column {exc.colno})"
+        ) from exc
     aggregate_stats = payload.get("aggregate_stats")
     if not isinstance(aggregate_stats, dict):
         raise ValueError(

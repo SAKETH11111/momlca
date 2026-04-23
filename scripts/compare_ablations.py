@@ -178,6 +178,10 @@ def _load_confidence_intervals(
     intervals_by_model: dict[str, dict[str, dict[str, object]]] = {}
     for model_name, path in sorted(summary_paths.items()):
         payload = json.loads(path.read_text())
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"Confidence summary for model {model_name!r} must be a JSON object: {path}"
+            )
         aggregate_stats = payload.get("aggregate_stats")
         if not isinstance(aggregate_stats, dict):
             raise ValueError(
