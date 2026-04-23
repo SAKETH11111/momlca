@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from gnn.baselines.protocol import Metadata, PredictorLike
+from gnn.evaluation.confidence_intervals import flatten_confidence_interval_metadata
 from gnn.evaluation.metrics.regression import compute_regression_metrics
 
 logger = logging.getLogger(__name__)
@@ -174,7 +175,14 @@ class ModelComparison:
                 if key != "model_type" and self._is_scalar_metadata_value(value)
             }
         )
-        for result in filtered:
+        ci_metadata_by_result: dict[int, dict[str, int | float | str | None]] = {
+            index: self._confidence_interval_metadata(result.metadata)
+            for index, result in enumerate(filtered)
+        }
+        ci_metadata_columns = sorted(
+            {key for metadata in ci_metadata_by_result.values() for key in metadata}
+        )
+        for result_index, result in enumerate(filtered):
             record = {
                 "model": result.model_name,
                 "split": result.split_name,
@@ -183,6 +191,8 @@ class ModelComparison:
             for key in metadata_columns:
                 value = result.metadata.get(key)
                 record[key] = value if self._is_scalar_metadata_value(value) else None
+            for key in ci_metadata_columns:
+                record[key] = ci_metadata_by_result[result_index].get(key)
             record.update(result.metrics)
             records.append(record)
 
@@ -482,6 +492,18 @@ class ModelComparison:
     @staticmethod
     def _is_scalar_metadata_value(value: object) -> bool:
         return isinstance(value, (str, int, float, bool, np.number))
+
+    @staticmethod
+    def _confidence_interval_metadata(metadata: Metadata) -> dict[str, int | float | str | None]:
+        interval_map = metadata.get("confidence_intervals")
+        if not isinstance(interval_map, Mapping):
+            return {}
+        typed_interval_map: dict[str, Mapping[str, Any]] = {
+            str(metric_name): summary
+            for metric_name, summary in interval_map.items()
+            if isinstance(summary, Mapping)
+        }
+        return flatten_confidence_interval_metadata(typed_interval_map)
 
 
 __all__ = ["ModelComparison", "ModelResult", "RegisteredModel"]

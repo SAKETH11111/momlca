@@ -352,3 +352,50 @@ def test_run_ablation_comparison_writes_csv_and_report_artifacts(tmp_path: Path)
     comparison_df = pd.read_csv(artifacts.comparison_csv, index_col=0)
     assert "checkpoint_path" in comparison_df.columns
     assert "checkpoint_id" in comparison_df.columns
+
+
+def test_run_ablation_comparison_passes_confidence_intervals_to_reports(tmp_path: Path) -> None:
+    export_a = _write_export(
+        tmp_path / "a.json",
+        split="test",
+        checkpoint_path="/tmp/exp1/model.ckpt",
+        property_names=["logS"],
+        records=_sample_records(log_s_predictions=(1.0, 2.0)),
+    )
+    export_b = _write_export(
+        tmp_path / "b.json",
+        split="test",
+        checkpoint_path="/tmp/exp2/model.ckpt",
+        property_names=["logS"],
+        records=_sample_records(log_s_predictions=(1.4, 2.7)),
+    )
+
+    artifacts = run_ablation_comparison(
+        {
+            "A": load_prediction_export(export_a, model_name="A"),
+            "B": load_prediction_export(export_b, model_name="B"),
+        },
+        output_dir=tmp_path / "reports",
+        confidence_intervals_by_model={
+            "A": {
+                "mae_mean": {
+                    "n": 3,
+                    "mean": 0.25,
+                    "std": 0.03,
+                    "sem": 0.01732,
+                    "ci_method": "normal",
+                    "ci_level": 0.95,
+                    "ci_low": 0.23,
+                    "ci_high": 0.27,
+                    "ci_half_width": 0.02,
+                    "ci95": 0.02,
+                }
+            }
+        },
+    )
+
+    comparison_df = pd.read_csv(artifacts.comparison_csv, index_col=0)
+    assert "mae_mean_ci_method" in comparison_df.columns
+    assert "mae_mean_ci_display" in comparison_df.columns
+    assert comparison_df.loc["A", "mae_mean_ci_method"] == "normal"
+    assert comparison_df.loc["A", "mae_mean_ci_display"] == "0.2500 +/- 0.0200"

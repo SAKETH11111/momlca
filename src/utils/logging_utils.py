@@ -6,6 +6,7 @@ from typing import Any
 from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf, open_dict
 
+from gnn.evaluation.confidence_intervals import interval_report_fields
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
@@ -163,16 +164,37 @@ def log_multiseed_summary_to_wandb(
                     ]
                     for row in per_run_rows
                 ]
-                aggregate_columns = ["metric", "n", "mean", "std", "ci95"]
+                aggregate_columns = [
+                    "metric",
+                    "n",
+                    "mean",
+                    "std",
+                    "sem",
+                    "ci_method",
+                    "ci_level",
+                    "ci_low",
+                    "ci_high",
+                    "ci_half_width",
+                    "ci95",
+                    "ci_display",
+                ]
                 aggregate_data = [
                     [
                         metric_name,
-                        stats.get("n"),
-                        stats.get("mean"),
-                        stats.get("std"),
-                        stats.get("ci95"),
+                        interval_fields.get("n"),
+                        interval_fields.get("mean"),
+                        interval_fields.get("std"),
+                        interval_fields.get("sem"),
+                        interval_fields.get("ci_method"),
+                        interval_fields.get("ci_level"),
+                        interval_fields.get("ci_low"),
+                        interval_fields.get("ci_high"),
+                        interval_fields.get("ci_half_width"),
+                        interval_fields.get("ci95"),
+                        interval_fields.get("ci_display"),
                     ]
                     for metric_name, stats in aggregate_stats.items()
+                    for interval_fields in [interval_report_fields(stats)]
                 ]
                 experiment.log(
                     {

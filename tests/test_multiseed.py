@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import math
 import sys
 import types
 from pathlib import Path
@@ -100,10 +102,83 @@ def test_compute_summary_statistics_uses_sample_std_and_ci95() -> None:
         ]
     )
 
-    assert stats["val/mae"]["n"] == 3
-    assert stats["val/mae"]["mean"] == pytest.approx(2.0)
-    assert stats["val/mae"]["std"] == pytest.approx(1.0)
-    assert stats["val/mae"]["ci95"] == pytest.approx(1.96 / (3**0.5))
+    val_mae = stats["val/mae"]
+    expected_half_width = 1.96 / (3**0.5)
+    assert val_mae["n"] == 3
+    assert val_mae["mean"] == pytest.approx(2.0)
+    assert val_mae["std"] == pytest.approx(1.0)
+    assert val_mae["sem"] == pytest.approx(1.0 / (3**0.5))
+    assert val_mae["ci_method"] == "normal"
+    assert val_mae["ci_level"] == pytest.approx(0.95)
+    assert val_mae["ci_low"] == pytest.approx(2.0 - expected_half_width)
+    assert val_mae["ci_high"] == pytest.approx(2.0 + expected_half_width)
+    assert val_mae["ci_half_width"] == pytest.approx(expected_half_width)
+    assert val_mae["ci95"] == pytest.approx(expected_half_width)
+
+
+def test_compute_summary_statistics_hides_bounds_for_low_support_metrics() -> None:
+    """Low-support summaries should avoid emitting misleading confidence bounds."""
+    stats = compute_summary_statistics(
+        [
+            {"metrics": {"val/mae": 1.0, "val/loss": 4.0}},
+            {"metrics": {"val/mae": 2.0}},
+        ]
+    )
+
+    val_mae = stats["val/mae"]
+    assert val_mae["n"] == 2
+    assert val_mae["std"] == pytest.approx(1.0 / (2**0.5))
+    assert val_mae["sem"] == pytest.approx(0.5)
+    assert val_mae["ci_method"] is None
+    assert val_mae["ci_level"] is None
+    assert val_mae["ci_low"] is None
+    assert val_mae["ci_high"] is None
+    assert val_mae["ci_half_width"] is None
+    assert val_mae["ci95"] is None
+
+    val_loss = stats["val/loss"]
+    assert val_loss["n"] == 1
+    assert val_loss["std"] is None
+    assert val_loss["sem"] is None
+    assert val_loss["ci_method"] is None
+    assert val_loss["ci_low"] is None
+
+
+def test_compute_summary_statistics_supports_deterministic_bootstrap_ci() -> None:
+    """Bootstrap intervals should be available as an explicit deterministic option."""
+    run_records = [
+        {"metrics": {"val/mae": 1.0}},
+        {"metrics": {"val/mae": 2.0}},
+        {"metrics": {"val/mae": 3.0}},
+        {"metrics": {"val/mae": 4.0}},
+    ]
+    stats_a = compute_summary_statistics(
+        run_records,
+        ci_method="bootstrap",
+        ci_level=0.9,
+        bootstrap_resamples=500,
+        bootstrap_random_seed=11,
+    )
+    stats_b = compute_summary_statistics(
+        run_records,
+        ci_method="bootstrap",
+        ci_level=0.9,
+        bootstrap_resamples=500,
+        bootstrap_random_seed=11,
+    )
+
+    metric_a = stats_a["val/mae"]
+    metric_b = stats_b["val/mae"]
+    assert metric_a["ci_method"] == "bootstrap"
+    assert metric_a["ci_level"] == pytest.approx(0.9)
+    assert metric_a["ci_low"] == pytest.approx(metric_b["ci_low"])
+    assert metric_a["ci_high"] == pytest.approx(metric_b["ci_high"])
+    assert metric_a["ci_half_width"] == pytest.approx(metric_b["ci_half_width"])
+    assert metric_a["ci_low"] < metric_a["mean"] < metric_a["ci_high"]
+    assert metric_a["ci_half_width"] == pytest.approx(
+        (metric_a["ci_high"] - metric_a["ci_low"]) / 2
+    )
+    assert metric_a["ci95"] == pytest.approx(1.96 * metric_a["std"] / math.sqrt(metric_a["n"]))
 
 
 def test_job_num_sort_key_orders_numeric_jobs_before_lexicographic_suffixes() -> None:
@@ -261,10 +336,13 @@ def test_apply_and_log_multiseed_wandb_metadata(monkeypatch: pytest.MonkeyPatch)
         assert cfg.logger.wandb.group == "train-multiseed-test"
         assert cfg.logger.wandb.job_type == "multiseed-child"
 
+        tables: list[object] = []
+
         class FakeTable:
             def __init__(self, *, columns, data) -> None:
                 self.columns = columns
                 self.data = data
+                tables.append(self)
 
         fake_wandb = types.SimpleNamespace(Table=FakeTable)
         monkeypatch.setitem(sys.modules, "wandb", fake_wandb)
@@ -300,5 +378,61 @@ def test_apply_and_log_multiseed_wandb_metadata(monkeypatch: pytest.MonkeyPatch)
         assert experiment.summary["multiseed/run_count"] == 2
         assert experiment.summary["multiseed/val/loss/mean"] == pytest.approx(1.5)
         experiment.log.assert_called_once()
+        assert len(tables) == 2
+        aggregate_table = next(table for table in tables if table.columns[0] == "metric")
+        assert aggregate_table.columns == [
+            "metric",
+            "n",
+            "mean",
+            "std",
+            "sem",
+            "ci_method",
+            "ci_level",
+            "ci_low",
+            "ci_high",
+            "ci_half_width",
+            "ci95",
+            "ci_display",
+        ]
     finally:
         GlobalHydra.instance().clear()
+
+
+def test_finalize_multiseed_run_writes_ci_columns_to_csv_and_markdown(tmp_path: Path) -> None:
+    """Deterministic sweep artifacts should include machine-readable and display CI fields."""
+    cfg = _compose_multiseed_cfg(tmp_path)
+    trainer = types.SimpleNamespace(checkpoint_callback=types.SimpleNamespace(best_model_path=""))
+
+    contexts = [
+        MultirunContext(
+            output_dir=tmp_path / "sweep" / str(job_num),
+            sweep_dir=tmp_path / "sweep",
+            job_num=str(job_num),
+            group_name="train-multiseed-test",
+            is_hydra_multirun=True,
+            expected_run_count=3,
+        )
+        for job_num in (0, 1, 2)
+    ]
+    for context, loss in zip(contexts, [1.0, 2.0, 3.0], strict=True):
+        finalize_multiseed_run(cfg, trainer, {"val/loss": loss}, [], context=context)
+
+    summary_csv = tmp_path / "sweep" / "multiseed_summary.csv"
+    rows = list(csv.DictReader(summary_csv.read_text().splitlines()))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["metric"] == "val/loss"
+    assert row["sem"] != ""
+    assert row["ci_method"] == "normal"
+    assert row["ci_level"] == "0.95"
+    assert row["ci_low"] != ""
+    assert row["ci_high"] != ""
+    assert row["ci_half_width"] != ""
+    assert row["ci95"] != ""
+    assert row["ci_display"] == "2.0000 +/- 1.1316"
+
+    summary_md = tmp_path / "sweep" / "multiseed_summary.md"
+    markdown = summary_md.read_text()
+    assert "ci_method" in markdown
+    assert "ci_display" in markdown
+    assert "2.0000 +/- 1.1316" in markdown

@@ -286,6 +286,42 @@ class TestModelComparison:
         assert "non_scalar" not in frame.columns
         assert frame.loc["Model1", "checkpoint_id"] == "best-abc12345"
 
+<<<<<<< HEAD
+    def test_to_dataframe_flattens_confidence_interval_metadata(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+        targets = np.array([[1.0], [2.0], [3.0]])
+        comparison.add_result(
+            "Model1",
+            targets + 0.1,
+            targets,
+            metadata={
+                "model_type": "gnn",
+                "confidence_intervals": {
+                    "mae_mean": {
+                        "n": 3,
+                        "mean": 0.25,
+                        "std": 0.03,
+                        "sem": 0.01732,
+                        "ci_method": "normal",
+                        "ci_level": 0.95,
+                        "ci_low": 0.23,
+                        "ci_high": 0.27,
+                        "ci_half_width": 0.02,
+                        "ci95": 0.02,
+                    }
+                },
+            },
+        )
+
+        frame = comparison.to_dataframe()
+        assert "mae_mean_ci_method" in frame.columns
+        assert "mae_mean_ci_low" in frame.columns
+        assert "mae_mean_ci_high" in frame.columns
+        assert "mae_mean_ci95" in frame.columns
+        assert "mae_mean_ci_display" in frame.columns
+        assert frame.loc["Model1", "mae_mean_ci_method"] == "normal"
+        assert frame.loc["Model1", "mae_mean_ci_display"] == "0.2500 +/- 0.0200"
+
     def test_to_dataframe_drops_non_scalar_values_from_scalar_metadata_columns(self) -> None:
         comparison = ModelComparison(property_names=["prop1"])
         targets = np.array([[1.0], [2.0]])
@@ -428,6 +464,40 @@ class TestModelComparison:
 
         assert "Statistical Significance Results" in content
         assert "wilcoxon" in content
+
+    def test_save_report_includes_ci_display_columns_when_available(self) -> None:
+        comparison = ModelComparison(property_names=["prop1"])
+        targets = np.array([[1.0], [2.0], [3.0]])
+        comparison.add_result(
+            "Model1",
+            targets + 0.1,
+            targets,
+            metadata={
+                "model_type": "gnn",
+                "confidence_intervals": {
+                    "mae_mean": {
+                        "n": 3,
+                        "mean": 0.25,
+                        "std": 0.03,
+                        "sem": 0.01732,
+                        "ci_method": "normal",
+                        "ci_level": 0.95,
+                        "ci_low": 0.23,
+                        "ci_high": 0.27,
+                        "ci_half_width": 0.02,
+                        "ci95": 0.02,
+                    }
+                },
+            },
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "comparison.md"
+            comparison.save_report(path)
+            content = path.read_text()
+
+        assert "mae_mean_ci_display" in content
+        assert "0.2500 +/- 0.0200" in content
 
 
 class TestCompareBaselinesCliHelpers:
