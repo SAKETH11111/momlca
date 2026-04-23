@@ -1,12 +1,14 @@
 """Tests for ablation comparison CLI helpers."""
-import json
+
 from __future__ import annotations
+
+import json
 from pathlib import Path
 
 import pytest
 
-from scripts.compare_ablations import _parse_named_paths
 from scripts import compare_ablations
+from scripts.compare_ablations import _parse_named_paths
 
 
 def test_load_confidence_intervals_rejects_non_object_payload(tmp_path: Path) -> None:

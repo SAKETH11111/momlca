@@ -286,7 +286,6 @@ class TestModelComparison:
         assert "non_scalar" not in frame.columns
         assert frame.loc["Model1", "checkpoint_id"] == "best-abc12345"
 
-<<<<<<< HEAD
     def test_to_dataframe_flattens_confidence_interval_metadata(self) -> None:
         comparison = ModelComparison(property_names=["prop1"])
         targets = np.array([[1.0], [2.0], [3.0]])
