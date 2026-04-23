@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import html
 import json
 import logging
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from hashlib import sha1
 from pathlib import Path
 from typing import Any, Literal
 
@@ -59,7 +60,7 @@ class FamilyAnalysisInput:
 class FamilyAnnotatedRecord:
     """One prediction record enriched with PFAS family labels and numeric arrays."""
 
-    key: tuple[str, str, str]
+    key: tuple[str, str]
     split_name: str
     smiles: str
     chain_length: str
@@ -162,7 +163,7 @@ def load_family_analysis_input(path: str | Path) -> FamilyAnalysisInput:
 
 def annotate_family_records(analysis_input: FamilyAnalysisInput) -> list[FamilyAnnotatedRecord]:
     """Derive family labels and validated numeric vectors for each record."""
-    seen_keys: set[tuple[str, str, str]] = set()
+    seen_keys: set[tuple[str, str]] = set()
     annotated: list[FamilyAnnotatedRecord] = []
 
     for index, record in enumerate(analysis_input.records):
@@ -406,14 +407,32 @@ def _write_report(
         "",
         "## Chain-length subgroup metrics",
         "",
-        chain_df.to_markdown(index=False, floatfmt=".6f"),
+        _to_markdown_or_fallback(chain_df),
         "",
         "## Headgroup subgroup metrics",
         "",
-        head_df.to_markdown(index=False, floatfmt=".6f"),
+        _to_markdown_or_fallback(head_df),
         "",
     ]
     report_path.write_text("\n".join(lines))
+
+
+def _to_markdown_or_fallback(frame: pd.DataFrame) -> str:
+    try:
+        return frame.to_markdown(index=False, floatfmt=".6f")
+    except ImportError:
+        logger.warning(
+            "tabulate is unavailable; falling back to plain-text table rendering in report"
+        )
+        return "\n".join(
+            [
+                "_Markdown table rendering unavailable (install `tabulate` for table formatting)._",
+                "",
+                "```text",
+                frame.to_string(index=False),
+                "```",
+            ]
+        )
 
 
 def _low_sample_lines(
@@ -533,10 +552,11 @@ def _write_distribution_figure(
     def y_coord(value: float) -> float:
         return top + plot_height - (value / max_value) * plot_height
 
+    escaped_title = _escape_svg_text(title)
     svg_parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{chart_width}" height="{chart_height}" '
         f'viewBox="0 0 {chart_width} {chart_height}">',
-        f'<text x="{left}" y="24" font-size="16" font-family="Arial">{title}</text>',
+        f'<text x="{left}" y="24" font-size="16" font-family="Arial">{escaped_title}</text>',
         f'<text x="{left}" y="40" font-size="12" font-family="Arial">Absolute residuals</text>',
         f'<line x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}" stroke="#111"/>',
         f'<line x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}" stroke="#111"/>',
@@ -571,21 +591,27 @@ def _write_distribution_figure(
                     f'<line x1="{x0:.2f}" y1="{y_coord(median):.2f}" x2="{x1:.2f}" y2="{y_coord(median):.2f}" stroke="#084594" stroke-width="2"/>',
                 ]
             )
+        escaped_label = _escape_svg_text(label)
         svg_parts.append(
-            f'<text x="{x_center:.2f}" y="{top + plot_height + 18}" text-anchor="middle" font-size="10" font-family="Arial">{label}</text>'
+            f'<text x="{x_center:.2f}" y="{top + plot_height + 18}" text-anchor="middle" font-size="10" font-family="Arial">{escaped_label}</text>'
         )
 
     svg_parts.append("</svg>")
     output_path.write_text("\n".join(svg_parts))
 
 
-def _record_key(record: dict[str, Any]) -> tuple[str, str, str]:
+def _record_key(record: dict[str, Any]) -> tuple[str, str]:
     inchikey = str(record.get("inchikey") or "").strip()
     smiles = str(record.get("smiles") or "").strip()
-    name = str(record.get("name") or "").strip()
     if inchikey == "" and smiles == "":
         raise ValueError("Record alignment requires at least inchikey or smiles")
-    return (inchikey, smiles, name)
+    if inchikey != "":
+        return ("inchikey", inchikey)
+    return ("smiles", smiles)
+
+
+def _escape_svg_text(value: str) -> str:
+    return html.escape(value, quote=False)
 
 
 def _values_for_properties(
@@ -629,7 +655,10 @@ def _normalize_metric_values(values: np.ndarray) -> np.ndarray:
 
 def _export_id(source_path: Path) -> str:
     stem = source_path.stem
-    digest = sha1(str(source_path).encode("utf-8")).hexdigest()[:8]
+    digest = hashlib.sha1(
+        str(source_path).encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()[:8]
     return f"{stem}-{digest}"
 
 
@@ -642,7 +671,7 @@ def _analysis_run_id(analysis_input: FamilyAnalysisInput) -> str:
             ",".join(analysis_input.property_names),
         ]
     )
-    return sha1(payload.encode("utf-8")).hexdigest()[:10]
+    return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
 
 
 def _artifact_stem(analysis_input: FamilyAnalysisInput) -> str:

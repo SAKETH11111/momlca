@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
+import gnn.evaluation.family_analysis as family_analysis
 from gnn.evaluation.family_analysis import (
     annotate_family_records,
     load_family_analysis_input,
@@ -249,6 +251,24 @@ def test_annotation_fails_on_duplicate_sample_key(tmp_path: Path) -> None:
         annotate_family_records(load_family_analysis_input(export_path))
 
 
+def test_annotation_detects_duplicate_stable_identifier_even_with_different_name(
+    tmp_path: Path,
+) -> None:
+    records = _sample_records()
+    records[1]["smiles"] = records[0]["smiles"]
+    records[1]["inchikey"] = records[0]["inchikey"]
+    records[1]["name"] = "PFOS alias"
+    export_path = _write_export(
+        tmp_path / "duplicate-stable-id.json",
+        split="test",
+        checkpoint_path="/tmp/models/family.ckpt",
+        property_names=["logS", "logP"],
+        records=records,
+    )
+    with pytest.raises(ValueError, match="Duplicate"):
+        annotate_family_records(load_family_analysis_input(export_path))
+
+
 def test_annotation_fails_on_property_mismatch(tmp_path: Path) -> None:
     records = _sample_records()
     records[0]["predictions"] = {"logS": 0.8}
@@ -261,3 +281,89 @@ def test_annotation_fails_on_property_mismatch(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="property"):
         annotate_family_records(load_family_analysis_input(export_path))
+
+
+def test_distribution_figure_escapes_dynamic_svg_text(tmp_path: Path) -> None:
+    output_path = tmp_path / "distribution.svg"
+    records = [
+        family_analysis.FamilyAnnotatedRecord(
+            key=("inchikey", "DTZQGRPZKCHYJP-UHFFFAOYSA-N"),
+            split_name="test",
+            smiles="C(=O)(C(F)(F)F)O",
+            chain_length="C<2>&",
+            headgroup="carboxylate",
+            targets=np.array([1.0]),
+            predictions=np.array([0.8]),
+        )
+    ]
+
+    family_analysis._write_distribution_figure(
+        annotated_records=records,
+        family_dimension="chain_length",
+        output_path=output_path,
+        title="Absolute <residuals> & spread",
+    )
+
+    svg = output_path.read_text()
+    assert "Absolute &lt;residuals&gt; &amp; spread" in svg
+    assert "C&lt;2&gt;&amp;" in svg
+
+
+def test_markdown_report_falls_back_without_tabulate(tmp_path: Path, monkeypatch) -> None:
+    export_path = _write_export(
+        tmp_path / "family-export.json",
+        split="test",
+        checkpoint_path="/tmp/models/family.ckpt",
+        property_names=["logS", "logP"],
+        records=_sample_records(),
+    )
+
+    def _raise_import_error(*_args: object, **_kwargs: object) -> str:
+        raise ImportError("Missing optional dependency 'tabulate'.")
+
+    monkeypatch.setattr(pd.DataFrame, "to_markdown", _raise_import_error)
+
+    artifacts = run_family_error_analysis(
+        analysis_input=load_family_analysis_input(export_path),
+        output_dir=tmp_path / "analysis",
+        low_sample_threshold=2,
+    )
+
+    report_text = artifacts.report_md.read_text()
+    assert "Markdown table rendering unavailable" in report_text
+    assert "```text" in report_text
+
+
+def test_export_and_run_ids_use_non_security_sha1(monkeypatch, tmp_path: Path) -> None:
+    observed_flags: list[bool] = []
+
+    class _FakeHash:
+        def hexdigest(self) -> str:
+            return "a" * 40
+
+    def _fake_sha1(
+        _payload: bytes,
+        *,
+        usedforsecurity: bool = True,
+    ) -> _FakeHash:
+        observed_flags.append(usedforsecurity)
+        return _FakeHash()
+
+    monkeypatch.setattr(family_analysis.hashlib, "sha1", _fake_sha1)
+
+    export_id = family_analysis._export_id(tmp_path / "export.json")
+    run_id = family_analysis._analysis_run_id(
+        family_analysis.FamilyAnalysisInput(
+            source_path=tmp_path / "export.json",
+            split_name="test",
+            checkpoint_path="/tmp/models/family.ckpt",
+            checkpoint_id="ckpt-id",
+            export_id="export-id",
+            property_names=["logS"],
+            records=[],
+        )
+    )
+
+    assert export_id == "export-aaaaaaaa"
+    assert run_id == "aaaaaaaaaa"
+    assert observed_flags == [False, False]
