@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
@@ -216,6 +217,7 @@ def run_ablation_comparison(
     output_dir: str | Path,
     significance_test: PairedTestName = "wilcoxon",
     use_wandb: bool = False,
+    confidence_intervals_by_model: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
 ) -> AblationComparisonArtifacts:
     """Generate deterministic ablation comparison artifacts from aligned exports."""
     aligned = align_prediction_exports(exports)
@@ -223,16 +225,25 @@ def run_ablation_comparison(
 
     for model_name in sorted(aligned.predictions_by_model):
         checkpoint_path = aligned.checkpoint_paths[model_name]
+        metadata: dict[str, Any] = {
+            "model_type": "gnn",
+            "checkpoint_path": checkpoint_path,
+            "checkpoint_id": checkpoint_export_id(checkpoint_path),
+        }
+        if confidence_intervals_by_model is not None:
+            interval_map = confidence_intervals_by_model.get(model_name)
+            if isinstance(interval_map, Mapping):
+                metadata["confidence_intervals"] = {
+                    str(metric_name): dict(summary)
+                    for metric_name, summary in interval_map.items()
+                    if isinstance(summary, Mapping)
+                }
         comparison.add_result(
             model_name,
             aligned.predictions_by_model[model_name],
             aligned.y_true,
             split_name=aligned.split_name,
-            metadata={
-                "model_type": "gnn",
-                "checkpoint_path": checkpoint_path,
-                "checkpoint_id": checkpoint_export_id(checkpoint_path),
-            },
+            metadata=metadata,
         )
 
     significance_df = build_pairwise_significance_table(

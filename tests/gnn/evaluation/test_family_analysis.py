@@ -11,6 +11,7 @@ import pytest
 
 import gnn.evaluation.family_analysis as family_analysis
 from gnn.evaluation.family_analysis import (
+    FamilyAnnotatedRecord,
     annotate_family_records,
     load_family_analysis_input,
     run_family_error_analysis,
@@ -367,3 +368,46 @@ def test_export_and_run_ids_use_non_security_sha1(monkeypatch, tmp_path: Path) -
     assert export_id == "export-aaaaaaaa"
     assert run_id == "aaaaaaaaaa"
     assert observed_flags == [False, False]
+
+def test_load_family_analysis_input_export_id_stable_for_equivalent_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    export_path = _write_export(
+        tmp_path / "equivalent-export.json",
+        split="test",
+        checkpoint_path="/tmp/models/family.ckpt",
+        property_names=["logS"],
+        records=_sample_records(),
+    )
+    monkeypatch.chdir(tmp_path)
+    relative_path = Path(".") / export_path.name
+
+    absolute_input = load_family_analysis_input(export_path.resolve())
+    relative_input = load_family_analysis_input(relative_path)
+
+    assert absolute_input.export_id == relative_input.export_id
+
+
+def test_write_distribution_figure_escapes_svg_text_content(tmp_path: Path) -> None:
+    records = [
+        FamilyAnnotatedRecord(
+            key=("inchikey-a", "smiles-a"),
+            split_name="test",
+            smiles="C",
+            chain_length="C<2 & up>",
+            headgroup="headgroup",
+            targets=np.array([1.0]),
+            predictions=np.array([1.3]),
+        )
+    ]
+    output_path = tmp_path / "escaped.svg"
+    family_analysis._write_distribution_figure(
+        annotated_records=records,
+        family_dimension="chain_length",
+        output_path=output_path,
+        title="Residuals <title> & detail",
+    )
+
+    svg = output_path.read_text()
+    assert "Residuals &lt;title&gt; &amp; detail" in svg
+    assert "C&lt;2 &amp; up&gt;" in svg

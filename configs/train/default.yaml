@@ -13,6 +13,10 @@ multiseed:
   enabled: null
   sweep_dir: null
   job_num: null
+  ci_method: normal
+  ci_level: 0.95
+  bootstrap_resamples: 2000
+  bootstrap_random_seed: 0
   metrics_filename: multiseed_metrics.json
   summary_json: multiseed_summary.json
   summary_csv: multiseed_summary.csv

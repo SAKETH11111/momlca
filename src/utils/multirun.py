@@ -12,16 +12,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from hydra.core.hydra_config import HydraConfig
 from hydra.types import RunMode
 from lightning import Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig, OmegaConf
+from scipy import stats as scipy_stats
 
+from gnn.evaluation.confidence_intervals import INTERVAL_FIELD_NAMES, interval_report_fields
 from src.utils import pylogger
 from src.utils.logging_utils import log_multiseed_summary_to_wandb
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
+
+DEFAULT_CI_METHOD = "normal"
+DEFAULT_CI_LEVEL = 0.95
+DEFAULT_BOOTSTRAP_RESAMPLES = 2000
+DEFAULT_BOOTSTRAP_RANDOM_SEED = 0
+MIN_CI_SAMPLE_COUNT = 3
+SUMMARY_CSV_FIELDS = ["metric", *INTERVAL_FIELD_NAMES, "ci_display"]
 
 
 @dataclass(frozen=True)
@@ -94,7 +104,33 @@ def finalize_multiseed_run(
 
     run_artifact_path = _write_run_metrics_artifact(cfg, trainer, metric_dict, multirun_context)
     run_records = _load_run_records(multirun_context, cfg)
-    aggregate_stats = compute_summary_statistics(run_records)
+    aggregate_stats = compute_summary_statistics(
+        run_records,
+        ci_method=str(
+            OmegaConf.select(cfg, "train.multiseed.ci_method", default=DEFAULT_CI_METHOD)
+        ),
+        ci_level=_coerce_float_config(
+            OmegaConf.select(cfg, "train.multiseed.ci_level", default=DEFAULT_CI_LEVEL),
+            default=DEFAULT_CI_LEVEL,
+            lower=0.0,
+            upper=1.0,
+        ),
+        bootstrap_resamples=_coerce_int_config(
+            OmegaConf.select(
+                cfg, "train.multiseed.bootstrap_resamples", default=DEFAULT_BOOTSTRAP_RESAMPLES
+            ),
+            default=DEFAULT_BOOTSTRAP_RESAMPLES,
+            lower=10,
+        ),
+        bootstrap_random_seed=_coerce_int_config(
+            OmegaConf.select(
+                cfg,
+                "train.multiseed.bootstrap_random_seed",
+                default=DEFAULT_BOOTSTRAP_RANDOM_SEED,
+            ),
+            default=DEFAULT_BOOTSTRAP_RANDOM_SEED,
+        ),
+    )
     missing_job_nums = _missing_job_nums(run_records, multirun_context.expected_run_count)
     is_complete = not missing_job_nums
     artifact_paths = _write_summary_artifacts(
@@ -138,12 +174,18 @@ def finalize_multiseed_run(
 
 def compute_summary_statistics(
     run_records: Sequence[Mapping[str, Any]],
-) -> dict[str, dict[str, float | int | None]]:
+    *,
+    ci_method: str = DEFAULT_CI_METHOD,
+    ci_level: float = DEFAULT_CI_LEVEL,
+    bootstrap_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
+    bootstrap_random_seed: int = DEFAULT_BOOTSTRAP_RANDOM_SEED,
+) -> dict[str, dict[str, float | int | str | None]]:
     """Compute aggregate statistics for every scalar metric emitted by child runs."""
+    resolved_method = _resolve_ci_method(ci_method)
     metric_names = sorted(
         {metric_name for record in run_records for metric_name in (record.get("metrics") or {})}
     )
-    summaries: dict[str, dict[str, float | int | None]] = {}
+    summaries: dict[str, dict[str, float | int | str | None]] = {}
     for metric_name in metric_names:
         values = [
             float(value)
@@ -157,17 +199,142 @@ def compute_summary_statistics(
         count = len(values)
         mean = float(statistics.fmean(values))
         std = float(statistics.stdev(values)) if count >= 2 else None
-        ci95 = None
-        if count >= 3 and std is not None:
-            ci95 = float(1.96 * std / math.sqrt(count))
+        sem = _sample_sem(values) if count >= 2 else None
+        ci95 = (
+            _normal_ci_half_width(mean=mean, sem=sem, ci_level=0.95)
+            if count >= MIN_CI_SAMPLE_COUNT
+            else None
+        )
+        interval = _compute_confidence_interval(
+            values=values,
+            mean=mean,
+            sem=sem,
+            ci_method=resolved_method,
+            ci_level=ci_level,
+            bootstrap_resamples=bootstrap_resamples,
+            bootstrap_random_seed=bootstrap_random_seed,
+        )
 
-        summaries[metric_name] = {
+        summary: dict[str, float | int | str | None] = {
             "n": count,
             "mean": mean,
             "std": std,
+            "sem": sem,
+            "ci_method": None,
+            "ci_level": None,
+            "ci_low": None,
+            "ci_high": None,
+            "ci_half_width": None,
             "ci95": ci95,
         }
+        summary.update(interval)
+        summaries[metric_name] = summary
     return summaries
+
+
+def _resolve_ci_method(ci_method: str) -> str:
+    normalized = ci_method.strip().lower()
+    if normalized in {"normal", "bootstrap"}:
+        return normalized
+    log.warning(
+        "Unknown multiseed CI method '%s'; falling back to normal approximation.", ci_method
+    )
+    return "normal"
+
+
+def _sample_sem(values: Sequence[float]) -> float | None:
+    sem = float(scipy_stats.sem(values, ddof=1))
+    if not math.isfinite(sem):
+        return None
+    return sem
+
+
+def _normal_ci_half_width(*, mean: float, sem: float | None, ci_level: float) -> float | None:
+    del mean
+    if sem is None or ci_level <= 0.0 or ci_level >= 1.0:
+        return None
+    if math.isclose(ci_level, 0.95, rel_tol=0.0, abs_tol=1e-12):
+        z_score = 1.96
+    else:
+        quantile = 0.5 + (ci_level / 2.0)
+        z_score = statistics.NormalDist().inv_cdf(quantile)
+    half_width = z_score * sem
+    if not math.isfinite(half_width):
+        return None
+    return float(half_width)
+
+
+def _compute_confidence_interval(
+    *,
+    values: Sequence[float],
+    mean: float,
+    sem: float | None,
+    ci_method: str,
+    ci_level: float,
+    bootstrap_resamples: int,
+    bootstrap_random_seed: int,
+) -> dict[str, float | str | None]:
+    if len(values) < MIN_CI_SAMPLE_COUNT:
+        return {}
+
+    if ci_method == "bootstrap":
+        return _bootstrap_confidence_interval(
+            values=values,
+            ci_level=ci_level,
+            bootstrap_resamples=bootstrap_resamples,
+            bootstrap_random_seed=bootstrap_random_seed,
+        )
+
+    half_width = _normal_ci_half_width(mean=mean, sem=sem, ci_level=ci_level)
+    if half_width is None:
+        return {}
+    return {
+        "ci_method": "normal",
+        "ci_level": ci_level,
+        "ci_low": mean - half_width,
+        "ci_high": mean + half_width,
+        "ci_half_width": half_width,
+    }
+
+
+def _bootstrap_confidence_interval(
+    *,
+    values: Sequence[float],
+    ci_level: float,
+    bootstrap_resamples: int,
+    bootstrap_random_seed: int,
+) -> dict[str, float | str | None]:
+    if ci_level <= 0.0 or ci_level >= 1.0:
+        log.warning("Invalid bootstrap ci_level=%s; skipping interval bounds.", ci_level)
+        return {}
+
+    rng = np.random.default_rng(bootstrap_random_seed)
+    try:
+        result = scipy_stats.bootstrap(
+            data=(np.asarray(values, dtype=float),),
+            statistic=np.mean,
+            confidence_level=ci_level,
+            n_resamples=bootstrap_resamples,
+            random_state=rng,
+            method="BCa",
+            vectorized=False,
+        )
+    except ValueError:
+        log.exception("Failed to compute bootstrap confidence interval; omitting bounds.")
+        return {}
+
+    ci_low = float(result.confidence_interval.low)
+    ci_high = float(result.confidence_interval.high)
+    if not math.isfinite(ci_low) or not math.isfinite(ci_high) or ci_high < ci_low:
+        log.warning("Bootstrap produced non-finite or invalid confidence bounds; omitting bounds.")
+        return {}
+    return {
+        "ci_method": "bootstrap",
+        "ci_level": ci_level,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "ci_half_width": (ci_high - ci_low) / 2.0,
+    }
 
 
 def _hydra_mode() -> RunMode | None:
@@ -357,7 +524,7 @@ def _write_summary_artifacts(
     cfg: DictConfig,
     context: MultirunContext,
     run_records: Sequence[Mapping[str, Any]],
-    aggregate_stats: Mapping[str, Mapping[str, float | int | None]],
+    aggregate_stats: Mapping[str, Mapping[str, float | int | str | None]],
     *,
     expected_run_count: int | None,
     is_complete: bool,
@@ -380,7 +547,14 @@ def _write_summary_artifacts(
     }
     summary_json.write_text(json.dumps(summary_payload, indent=2, sort_keys=True) + "\n")
     _write_summary_csv(summary_csv, aggregate_stats)
-    _write_summary_markdown(summary_md, run_records, aggregate_stats)
+    _write_summary_markdown(
+        summary_md,
+        run_records,
+        aggregate_stats,
+        expected_run_count=expected_run_count,
+        is_complete=is_complete,
+        missing_job_nums=missing_job_nums,
+    )
 
     log.info("Updated multi-seed summary artifacts in %s", context.sweep_dir)
     return {
@@ -392,38 +566,59 @@ def _write_summary_artifacts(
 
 def _write_summary_csv(
     path: Path,
-    aggregate_stats: Mapping[str, Mapping[str, float | int | None]],
+    aggregate_stats: Mapping[str, Mapping[str, float | int | str | None]],
 ) -> None:
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["metric", "n", "mean", "std", "ci95"])
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_CSV_FIELDS)
         writer.writeheader()
         for metric_name, stats in aggregate_stats.items():
-            writer.writerow({"metric": metric_name, **stats})
+            writer.writerow({"metric": metric_name, **interval_report_fields(stats)})
 
 
 def _write_summary_markdown(
     path: Path,
     run_records: Sequence[Mapping[str, Any]],
-    aggregate_stats: Mapping[str, Mapping[str, float | int | None]],
+    aggregate_stats: Mapping[str, Mapping[str, float | int | str | None]],
+    *,
+    expected_run_count: int | None,
+    is_complete: bool,
+    missing_job_nums: Sequence[str],
 ) -> None:
     run_rows = _run_table_rows(run_records)
     aggregate_rows = [
         [
             metric_name,
-            _format_markdown_value(stats.get("n")),
-            _format_markdown_value(stats.get("mean")),
-            _format_markdown_value(stats.get("std")),
-            _format_markdown_value(stats.get("ci95")),
+            _format_markdown_value(interval_fields.get("n")),
+            _format_markdown_value(interval_fields.get("mean")),
+            _format_markdown_value(interval_fields.get("std")),
+            _format_markdown_value(interval_fields.get("sem")),
+            _format_markdown_value(interval_fields.get("ci_method")),
+            _format_markdown_value(interval_fields.get("ci_level")),
+            _format_markdown_value(interval_fields.get("ci_low")),
+            _format_markdown_value(interval_fields.get("ci_high")),
+            _format_markdown_value(interval_fields.get("ci_half_width")),
+            _format_markdown_value(interval_fields.get("ci95")),
+            _format_markdown_value(interval_fields.get("ci_display")),
         ]
         for metric_name, stats in aggregate_stats.items()
+        for interval_fields in [interval_report_fields(stats)]
     ]
+    expected_runs = _format_markdown_value(expected_run_count)
+    missing_display = ", ".join(missing_job_nums) if missing_job_nums else "none"
     lines = [
         "# Multi-Seed Training Summary",
+        "",
+        "## Sweep Status",
+        "",
+        f"- `run_count`: {len(run_records)}",
+        f"- `expected_run_count`: {expected_runs}",
+        f"- `is_complete`: {str(is_complete).lower()}",
+        f"- `missing_job_nums`: {missing_display}",
         "",
         "## Aggregate Metrics",
         "",
         _markdown_table(
-            ["metric", "n", "mean", "std", "ci95"],
+            SUMMARY_CSV_FIELDS,
             aggregate_rows,
         ),
         "",
@@ -490,6 +685,41 @@ def _to_scalar(value: Any) -> float | None:
         value = float(value)
         return value if math.isfinite(value) else None
     return None
+
+
+def _coerce_float_config(
+    value: Any,
+    *,
+    default: float,
+    lower: float | None = None,
+    upper: float | None = None,
+) -> float:
+    try:
+        scalar = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(scalar):
+        return default
+    if lower is not None and scalar <= lower:
+        return default
+    if upper is not None and scalar >= upper:
+        return default
+    return scalar
+
+
+def _coerce_int_config(
+    value: Any,
+    *,
+    default: int,
+    lower: int | None = None,
+) -> int:
+    try:
+        scalar = int(value)
+    except (TypeError, ValueError):
+        return default
+    if lower is not None and scalar < lower:
+        return default
+    return scalar
 
 
 def _format_markdown_value(value: Any) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from pathlib import Path
 
@@ -65,6 +66,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=5,
         help="Sample-count threshold used to flag low-sample family rows in reports.",
     )
+    parser.add_argument(
+        "--confidence-summary",
+        default=None,
+        help=(
+            "Optional multiseed_summary.json path. When provided, aggregate confidence "
+            "interval stats are copied as a deterministic sidecar artifact."
+        ),
+    )
     return parser
 
 
@@ -76,6 +85,11 @@ def main() -> None:
     _validate_inputs(model_spec=args.model, prediction_export=args.prediction_export)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    confidence_summary_path = (
+        _validate_confidence_summary_path(args.confidence_summary)
+        if args.confidence_summary is not None
+        else None
+    )
 
     if args.prediction_export is not None:
         export_path = Path(args.prediction_export).expanduser()
@@ -108,11 +122,55 @@ def main() -> None:
     logger.info("Headgroup metrics CSV: %s", artifacts.headgroup_csv)
     logger.info("Chain-length figure: %s", artifacts.chain_length_figure)
     logger.info("Headgroup figure: %s", artifacts.headgroup_figure)
+    if confidence_summary_path is not None:
+        sidecar_path = _write_confidence_summary_sidecar(
+            source_path=confidence_summary_path,
+            output_dir=output_dir,
+            report_path=artifacts.report_md,
+        )
+        logger.info("Confidence summary sidecar: %s", sidecar_path)
 
 
 def _validate_inputs(*, model_spec: str | None, prediction_export: str | None) -> None:
     if (model_spec is None) == (prediction_export is None):
         raise ValueError("Provide exactly one of --model or --prediction-export")
+
+
+def _validate_confidence_summary_path(path_value: str) -> Path:
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        raise FileNotFoundError(f"Confidence summary does not exist: {path}")
+    return path
+
+
+def _write_confidence_summary_sidecar(
+    *,
+    source_path: Path,
+    output_dir: Path,
+    report_path: Path,
+) -> Path:
+    try:
+        payload = json.loads(source_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Confidence summary {source_path} is not valid JSON: {exc.msg} "
+            f"(line {exc.lineno}, column {exc.colno})"
+        ) from exc
+    aggregate_stats = payload.get("aggregate_stats")
+    if not isinstance(aggregate_stats, dict):
+        raise ValueError(
+            f"Confidence summary {source_path} does not contain aggregate_stats mapping"
+        )
+    sidecar_path = output_dir / f"{report_path.stem}-confidence-summary.json"
+    sidecar_path.write_text(
+        json.dumps(
+            {"source_path": str(source_path), "aggregate_stats": aggregate_stats},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    return sidecar_path
 
 
 def _parse_checkpoint_spec(model_spec: str | None) -> str:

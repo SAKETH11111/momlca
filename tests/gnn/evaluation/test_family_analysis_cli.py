@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _write_export(path: Path, *, checkpoint_path: str = "/tmp/models/family.ckpt") -> Path:
     payload = {
@@ -105,3 +107,84 @@ def test_analyze_family_errors_cli_with_model_path_uses_eval_export_seam(
     assert captured["eval_output_dir"] == str(output_dir)
     assert captured["eval_log_dir"] == str(output_dir)
     assert any(output_dir.glob("*-family-report.md"))
+
+
+def test_analyze_family_errors_cli_writes_confidence_summary_sidecar(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from scripts import analyze_family_errors
+
+    export_path = _write_export(tmp_path / "predictions.json")
+    summary_path = tmp_path / "multiseed_summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "aggregate_stats": {
+                    "mae_mean": {
+                        "n": 3,
+                        "mean": 0.25,
+                        "std": 0.03,
+                        "sem": 0.01732,
+                        "ci_method": "normal",
+                        "ci_level": 0.95,
+                        "ci_low": 0.23,
+                        "ci_high": 0.27,
+                        "ci_half_width": 0.02,
+                        "ci95": 0.02,
+                    }
+                }
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    output_dir = tmp_path / "analysis"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scripts/analyze_family_errors.py",
+            "--prediction-export",
+            str(export_path),
+            "--output-dir",
+            str(output_dir),
+            "--confidence-summary",
+            str(summary_path),
+        ],
+    )
+
+    analyze_family_errors.main()
+
+    sidecar_paths = list(output_dir.glob("*-confidence-summary.json"))
+    assert len(sidecar_paths) == 1
+    payload = json.loads(sidecar_paths[0].read_text())
+    assert payload["source_path"] == str(summary_path)
+    assert "mae_mean" in payload["aggregate_stats"]
+
+
+def test_analyze_family_errors_cli_rejects_malformed_confidence_summary_json(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from scripts import analyze_family_errors
+
+    export_path = _write_export(tmp_path / "predictions.json")
+    malformed_summary_path = tmp_path / "malformed-summary.json"
+    malformed_summary_path.write_text('{"aggregate_stats": ')
+    output_dir = tmp_path / "analysis"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scripts/analyze_family_errors.py",
+            "--prediction-export",
+            str(export_path),
+            "--output-dir",
+            str(output_dir),
+            "--confidence-summary",
+            str(malformed_summary_path),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        analyze_family_errors.main()

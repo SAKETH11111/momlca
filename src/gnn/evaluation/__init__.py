@@ -1,5 +1,12 @@
 """Evaluation utilities for molecular property prediction."""
 
+from gnn.evaluation.confidence_intervals import (
+    INTERVAL_FIELD_NAMES,
+    flatten_confidence_interval_metadata,
+    format_interval_display,
+    interval_report_fields,
+    normalize_interval_summary,
+)
 from gnn.evaluation.export import (
     build_prediction_records,
     checkpoint_export_id,
@@ -26,13 +33,18 @@ __all__ = [
     "FamilyAnalysisArtifacts",
     "FamilyAnalysisInput",
     "FamilyAnnotatedRecord",
+    "INTERVAL_FIELD_NAMES",
     "annotate_family_records",
     "build_prediction_records",
     "build_pairwise_significance_table",
     "checkpoint_export_id",
     "export_prediction_records",
+    "flatten_confidence_interval_metadata",
+    "format_interval_display",
+    "interval_report_fields",
     "load_family_analysis_input",
     "maybe_log_prediction_artifact",
+    "normalize_interval_summary",
     "resolve_prediction_export_path",
     "run_family_error_analysis",
     "run_paired_significance_test",

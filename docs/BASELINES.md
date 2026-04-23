@@ -19,6 +19,8 @@ For PFASBench-wide exports, use `export_pfasbench_descriptors(...)` to create `d
 
 `ModelComparison` collects results across one or more named splits and exports CSV, Markdown, LaTeX, and W&B-friendly summaries. The report includes an overall summary table, per-split MAE rankings, and best-model-per-target sections. The default regression metrics are MAE, RMSE, R², Pearson, and Spearman, computed per property and averaged across properties.
 
+For seed-swept runs, confidence intervals are reported from the canonical `multiseed_summary.json` contract. Aggregate rows include machine-readable fields (`n`, `mean`, `std`, `sem`, `ci_method`, `ci_level`, `ci_low`, `ci_high`, `ci_half_width`, `ci95`) plus a paper-friendly `ci_display` string (`mean +/- half_width`). Low-support metrics intentionally omit bounds instead of fabricating certainty.
+
 For an end-to-end baseline run, use:
 
 ```bash
@@ -68,3 +70,20 @@ The workflow writes deterministic local artifacts under `--output-dir`:
 - `ablation-<split>-<run_id>-report.md` (summary report with significance table)
 
 For pre-exported prediction payloads from prior eval runs, provide `--prediction-exports name=/path/to/export.json` entries to skip checkpoint re-evaluation.
+
+To pass through existing multi-seed confidence summaries into ablation CSV/Markdown outputs (without introducing sweep orchestration in this script), provide matching summary files:
+
+```bash
+poetry run python scripts/compare_ablations.py \
+  --prediction-exports \
+    GIN2D=/tmp/gin-export.json \
+    PaiNN3D=/tmp/painn-export.json \
+  --confidence-summaries \
+    GIN2D=/tmp/gin-multiseed_summary.json \
+    PaiNN3D=/tmp/painn-multiseed_summary.json \
+  --output-dir reports/ablation_comparison
+```
+
+`scripts/analyze_family_errors.py` also accepts `--confidence-summary /path/to/multiseed_summary.json` to copy sweep-level CI stats into a deterministic sidecar artifact alongside the family report outputs.
+
+Confidence intervals are descriptive uncertainty summaries only; they do not replace paired significance testing.
