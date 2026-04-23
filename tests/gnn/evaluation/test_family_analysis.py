@@ -369,6 +369,7 @@ def test_export_and_run_ids_use_non_security_sha1(monkeypatch, tmp_path: Path) -
     assert run_id == "aaaaaaaaaa"
     assert observed_flags == [False, False]
 
+
 def test_load_family_analysis_input_export_id_stable_for_equivalent_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
