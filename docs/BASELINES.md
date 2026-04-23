@@ -47,3 +47,24 @@ poetry run python scripts/compare_baselines.py \
 Checkpoint-backed GNN adapters can be supplied the same way with `name=gnn:/path/to/model.ckpt` plus `--gnn-loader package.module:load_predictor`. The loader should return an object with either `predict(X)` or `predict_dataset(dataset, split_name=...)`.
 
 Use `--wandb-mode offline` to log locally to Weights & Biases without requiring an online run.
+
+## Checkpoint Ablation Comparison
+
+Use `scripts/compare_ablations.py` to compare multiple GNN checkpoints on the same held-out test split using the canonical evaluation/export pipeline from `src/eval.py`.
+
+```bash
+poetry run python scripts/compare_ablations.py \
+  --models \
+    GIN2D=gnn:/path/to/gin2d.ckpt \
+    PaiNN3D=gnn:/path/to/painn3d.ckpt \
+  --eval-overrides data=pfasbench_scaffold seed=42 \
+  --output-dir reports/ablation_comparison
+```
+
+The workflow writes deterministic local artifacts under `--output-dir`:
+
+- `ablation-<split>-<run_id>-comparison.csv` (aggregate regression metrics from `ModelComparison`)
+- `ablation-<split>-<run_id>-significance.csv` (paired significance on aligned per-example absolute errors)
+- `ablation-<split>-<run_id>-report.md` (summary report with significance table)
+
+For pre-exported prediction payloads from prior eval runs, provide `--prediction-exports name=/path/to/export.json` entries to skip checkpoint re-evaluation.

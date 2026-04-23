@@ -7,6 +7,7 @@ import logging
 import math
 import re
 from collections.abc import Mapping, Sequence
+from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,28 @@ def _resolve_property_names(
 
 def _tensor_row_to_mapping(values: torch.Tensor, names: Sequence[str]) -> dict[str, float | None]:
     return {name: _as_float(float(values[index])) for index, name in enumerate(names)}
+
+
+def checkpoint_export_id(checkpoint_path: str, *, hash_length: int = 10) -> str:
+    """Return a deterministic, collision-resistant checkpoint identifier for filenames."""
+    ckpt_stem = Path(str(checkpoint_path)).stem or "checkpoint"
+    safe_ckpt_stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", ckpt_stem).strip("-")
+    if safe_ckpt_stem == "":
+        safe_ckpt_stem = "checkpoint"
+    digest = sha1(str(checkpoint_path).encode("utf-8")).hexdigest()[:hash_length]
+    return f"{safe_ckpt_stem}-{digest}"
+
+
+def resolve_prediction_export_path(
+    *,
+    output_dir: str | Path,
+    split_name: str,
+    checkpoint_path: str,
+) -> Path:
+    """Resolve the deterministic prediction export file path for one checkpoint/split."""
+    output_dir_path = Path(output_dir)
+    checkpoint_id = checkpoint_export_id(checkpoint_path)
+    return output_dir_path / f"{split_name}-{checkpoint_id}-predictions.json"
 
 
 def build_prediction_records(
@@ -179,11 +202,11 @@ def export_prediction_records(
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    ckpt_stem = Path(str(checkpoint_path)).stem or "checkpoint"
-    safe_ckpt_stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", ckpt_stem).strip("-")
-    if safe_ckpt_stem == "":
-        safe_ckpt_stem = "checkpoint"
-    export_path = output_dir_path / f"{split_name}-{safe_ckpt_stem}-predictions.json"
+    export_path = resolve_prediction_export_path(
+        output_dir=output_dir_path,
+        split_name=split_name,
+        checkpoint_path=checkpoint_path,
+    )
 
     payload = {
         "metadata": {

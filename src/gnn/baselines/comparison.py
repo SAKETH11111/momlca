@@ -166,12 +166,23 @@ class ModelComparison:
             if split_name is None or result.split_name == split_name
         ]
         records = []
+        metadata_columns = sorted(
+            {
+                key
+                for result in filtered
+                for key, value in result.metadata.items()
+                if key != "model_type" and self._is_scalar_metadata_value(value)
+            }
+        )
         for result in filtered:
             record = {
                 "model": result.model_name,
                 "split": result.split_name,
                 "model_type": result.metadata.get("model_type", "unknown"),
             }
+            for key in metadata_columns:
+                value = result.metadata.get(key)
+                record[key] = value if self._is_scalar_metadata_value(value) else None
             record.update(result.metrics)
             records.append(record)
 
@@ -183,9 +194,17 @@ class ModelComparison:
         metric_columns = sorted(
             column
             for column in frame.columns
-            if column not in {"model", "split", "model_type"} and not column.endswith("_mean")
+            if column not in {"model", "split", "model_type", *metadata_columns}
+            and not column.endswith("_mean")
         )
-        ordered = ["model", "split", "model_type", *mean_columns, *metric_columns]
+        ordered = [
+            "model",
+            "split",
+            "model_type",
+            *metadata_columns,
+            *mean_columns,
+            *metric_columns,
+        ]
         frame = frame[ordered]
 
         if split_name is not None or frame["split"].nunique() == 1:
@@ -296,6 +315,7 @@ class ModelComparison:
         *,
         split_name: str | None = None,
         metric_types: list[str] | None = None,
+        significance: pd.DataFrame | None = None,
     ) -> None:
         """Write a Markdown report summarizing comparison results."""
         output_path = Path(path)
@@ -332,15 +352,25 @@ class ModelComparison:
             for property_name, best_model in best_per_target.items():
                 lines.append(f"- `{property_name}`: `{best_model}`")
 
-        lines.extend(
-            [
-                "",
-                "## Statistical Significance Notes",
-                "",
-                "Statistical significance is not computed in this report yet.",
-                "Treat small metric gaps as directional unless they are confirmed with paired significance tests.",
-            ]
-        )
+        if significance is not None and not significance.empty:
+            lines.extend(
+                [
+                    "",
+                    "## Statistical Significance Results",
+                    "",
+                    significance.to_markdown(index=False, floatfmt=".6f"),
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "",
+                    "## Statistical Significance Notes",
+                    "",
+                    "Statistical significance is not computed in this report yet.",
+                    "Treat small metric gaps as directional unless they are confirmed with paired significance tests.",
+                ]
+            )
 
         output_path.write_text("\n".join(lines))
 
@@ -448,6 +478,10 @@ class ModelComparison:
                 best_models[property_name] = str(frame[metric_name].idxmin())
 
         return best_models
+
+    @staticmethod
+    def _is_scalar_metadata_value(value: object) -> bool:
+        return isinstance(value, (str, int, float, bool, np.number))
 
 
 __all__ = ["ModelComparison", "ModelResult", "RegisteredModel"]
